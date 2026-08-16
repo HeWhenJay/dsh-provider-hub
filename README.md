@@ -11,6 +11,7 @@
 - API Key 渠道：官方 API、中转站、本地网关或其他 OpenAI-compatible 服务。
 - 模型发现：优先复用 DSH 自带的一键模型发现，失败时直接读取供应商 `/models`。
 - 聚合 OpenAI-compatible API：`/v1/models`、`/v1/chat/completions`、`/v1/responses`。
+- 自动接入 DSH Models：服务启动后按实际监听端口创建 `provider-hub` 供应商，并同步聚合模型目录。
 - 路由控制：优先级、普通/保底渠道、瞬时故障冷却、最大尝试次数、会话粘性和模型别名。
 - 安全凭据：实际密钥写入 DSH credentials；JSON 配置仅保存凭据引用。
 - 脱敏日志：只保留渠道、模型、HTTP 状态和延迟，不记录提示词、密钥或完整上游 URL。
@@ -23,16 +24,16 @@
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.3.2
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.4.0
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.3.2.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.4.0.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.3.2.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.4.0.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.3.2 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.4.0 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏底部的 **Provider Hub** 或 **Settings → Provider Hub** 进入。
 
@@ -72,20 +73,21 @@ Provider Hub 只在 `127.0.0.1` 上临时监听对应端口并校验 OAuth state
 
 ## 接入 DSH Models
 
-Provider Hub 默认在 `127.0.0.1:19529` 提供统一接口。实际 Base URL 会显示在页面顶部，例如：
+Provider Hub 默认在 `127.0.0.1:19529` 提供统一接口。服务成功启动且聚合目录至少包含一个模型后，插件会通过 DSH 官方 settings 服务自动创建或更新 `llm-pi-ai.providers.provider-hub`：
+
+- Base URL 使用页面显示的实际地址，包括端口冲突后的自动避让端口；
+- API 固定为 OpenAI Chat Completions；
+- 模型从 Provider Hub 的聚合 `/v1/models` 目录读取、去重，并尽可能保留名称、上下文窗口和最大输出长度；
+- 只有已配置 Provider Hub 客户端访问密钥时才写入对应 `apiKeyEnv`；
+- 渠道、官方账号或 sidecar 模型变化后会自动重新同步。
+
+插件只管理 `provider-hub` 这一条供应商，不修改其他供应商，也不会切换 `agent-default-model`。如果用户已经手工创建了同名条目，插件会报告冲突并保持原配置不变。Relay 停止、禁用或聚合模型为空时，插件只删除经自身确认创建的条目；模型为空时状态显示为等待，不写入 DSH 无法使用的空模型供应商。
+
+实际 Base URL 仍会显示在页面顶部，例如：
 
 ```text
 http://127.0.0.1:19529/v1
 ```
-
-在 DSH Models 中添加 OpenAI-compatible provider：
-
-- Base URL：使用页面显示的实际 Base URL；
-- API：根据客户端需求选择 Chat Completions 或 Responses；
-- API Key：仅在 Provider Hub 的客户端访问密钥已配置时填写同一密钥；
-- 模型：可使用 DSH 的一键发现读取 Provider Hub 聚合目录。
-
-插件不会自动替换当前 DSH 模型 provider，也不会改动现有上游。请在确认新服务可用后由用户自行切换模型配置。
 
 ## 路由规则
 
@@ -163,6 +165,11 @@ provider-hub/sidecar/
     "port": 19629,
     "priority": 1000
   },
+  "managedProvider": {
+    "enabled": true,
+    "id": "provider-hub",
+    "displayName": "Provider Hub"
+  },
   "routes": []
 }
 ```
@@ -225,7 +232,7 @@ v0.3 更名为 DSH Provider Hub，并从“桥接外部 Cockpit”迁移为独�
 5. 新建渠道使用 `DSH_PROVIDER_HUB_*` 命名。
 6. `/api/cockpit-relay` 暂时作为管理 API 兼容别名保留；新 Web Client 只调用 `/api/provider-hub`。
 
-迁移不会修改当前 DSH Models provider，也不会接管任何已经监听的 Cockpit 端口。
+迁移不会修改当前 DSH 默认模型，也不会接管任何已经监听的 Cockpit 端口。Provider Hub 自 v0.4 起只会新增并管理独立的 `provider-hub` 模型供应商；其他 DSH Models 条目保持不变。
 
 ## 故障排查
 
@@ -233,6 +240,8 @@ v0.3 更名为 DSH Provider Hub，并从“桥接外部 Cockpit”迁移为独�
 - **账号服务安装失败**：确认 GitHub Releases 可访问、DSH Home 可写、系统架构受支持。SHA-256 不匹配时插件会删除下载并拒绝执行。
 - **OAuth 无法开始**：固定 localhost 回调端口可能已占用。插件不会抢占；释放相应端口后重试。
 - **OAuth 完成后没有模型**：点击 **刷新账号**，检查账号是否停用或暂不可用；也可保留 API Key 渠道作为普通或保底路径。
+- **DSH 中没有自动出现 Provider Hub**：确认 relay 正在运行且至少有一个可用模型；零模型时插件会等待，不创建无效供应商。
+- **显示同名供应商冲突**：DSH 已存在非插件创建的 `provider-hub` 条目。插件不会覆盖它；请先在 Models 中改名或删除该条目再刷新 Provider Hub。
 - **DSH 无法访问 relay**：使用实际 Base URL；检查 relay 开关与客户端密钥。LAN 模式无密钥时服务会拒绝启动。
 
 ## 开发与验证
@@ -242,7 +251,7 @@ npm test
 npm pack --dry-run
 ```
 
-测试覆盖路由优先级、保底与冷却、流式响应、端口避让、凭据不落盘、日志脱敏、模型发现、账号管理契约、OAuth state 限制、sidecar 资源映射与 checksum 解析、打包边界和浏览器模块注册。
+测试覆盖路由优先级、保底与冷却、流式响应、端口避让、凭据不落盘、日志脱敏、模型发现、DSH 供应商同步与冲突保护、账号管理契约、OAuth state 限制、sidecar 资源映射与 checksum 解析、打包边界和浏览器模块注册。
 
 ## 许可与第三方组件
 

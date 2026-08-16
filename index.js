@@ -9,6 +9,7 @@ const LEGACY_MANAGEMENT_PREFIX = '/api/cockpit-relay';
 const LOG_LIMIT = 500;
 const MAX_DISCOVERY_BYTES = 4 * 1024 * 1024;
 const OAUTH_SESSION_TTL_MS = 10 * 60 * 1000;
+const SETTINGS_NAMESPACE = 'llm-pi-ai';
 const OAUTH_PROVIDER_PATH = {
   codex: 'codex-auth-url',
   anthropic: 'anthropic-auth-url',
@@ -133,9 +134,61 @@ function sendJson(res, status, value, cors = false) {
 function modelsResponse(routes) {
   const models = new Map();
   for (const route of routes) {
-    for (const id of route.models) models.set(id, { id, object: 'model', created: 0, owned_by: route.displayName });
+    for (const raw of route.models) {
+      const model = typeof raw === 'string' ? route.modelMetadata?.[raw] ?? { id: raw } : raw;
+      const id = asString(model?.id);
+      if (!id || models.has(id)) continue;
+      models.set(id, {
+        id,
+        object: 'model',
+        created: 0,
+        owned_by: route.displayName,
+        ...(asString(model?.name) ? { name: asString(model.name) } : {}),
+        ...(Number.isInteger(model?.contextWindow) && model.contextWindow > 0 ? { context_window: model.contextWindow } : {}),
+        ...(Number.isInteger(model?.maxTokens) && model.maxTokens > 0 ? { max_output_tokens: model.maxTokens } : {})
+      });
+    }
   }
   return { object: 'list', data: [...models.values()] };
+}
+
+function managedModels(routes, supplemental = []) {
+  const models = new Map();
+  const append = (raw) => {
+    const model = typeof raw === 'string' ? { id: raw } : raw;
+    const id = asString(model?.id);
+    if (!id) return;
+    const existing = models.get(id) ?? { id };
+    const name = asString(model?.name ?? model?.display_name ?? model?.displayName);
+    const contextWindow = Number(model?.context_window ?? model?.context_length ?? model?.contextWindow);
+    const maxTokens = Number(model?.max_output_tokens ?? model?.max_tokens ?? model?.maxTokens);
+    models.set(id, {
+      ...existing,
+      ...(name && name !== id ? { name } : {}),
+      ...(Number.isInteger(contextWindow) && contextWindow > 0 ? { contextWindow } : {}),
+      ...(Number.isInteger(maxTokens) && maxTokens > 0 ? { maxTokens } : {})
+    });
+  };
+  for (const model of supplemental) append(model);
+  for (const route of routes) for (const model of route.models) append(route.modelMetadata?.[model] ?? model);
+  return [...models.values()];
+}
+
+function managedProviderMatches(profile, expected, { includeModels = true } = {}) {
+  if (!profile || typeof profile !== 'object') return false;
+  if (profile.baseURL !== expected.baseURL || profile.api !== expected.api || profile.displayName !== expected.displayName) return false;
+  if ((profile.apiKeyEnv || undefined) !== (expected.apiKeyEnv || undefined)) return false;
+  if (!includeModels) return true;
+  return JSON.stringify(profile.models ?? []) === JSON.stringify(expected.models);
+}
+
+function sameJson(left, right) {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((item, index) => sameJson(item, right[index]));
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index] && sameJson(left[key], right[key]));
 }
 
 function persistConfig(filename, config) {
@@ -166,7 +219,16 @@ function routeInput(raw, existing) {
   const suppliedApiKeyEnv = asString(value.apiKeyEnv);
   const apiKeyEnv = suppliedApiKeyEnv || existing?.apiKeyEnv || generatedRouteCredentialRef(id);
   asCredentialRef(apiKeyEnv);
-  const models = Array.isArray(value.models) ? value.models.map((item) => asString(item)).filter(Boolean) : existing?.models ?? [];
+  const sourceModels = Array.isArray(value.models) ? value.models : existing?.models ?? [];
+  const modelMetadata = value.modelMetadata && typeof value.modelMetadata === 'object' ? { ...value.modelMetadata } : { ...(existing?.modelMetadata ?? {}) };
+  const models = [];
+  for (const rawModel of sourceModels) {
+    const id = asString(typeof rawModel === 'string' ? rawModel : rawModel?.id);
+    if (!id || models.includes(id)) continue;
+    models.push(id);
+    if (rawModel && typeof rawModel === 'object') modelMetadata[id] = { ...rawModel, id };
+  }
+  for (const id of Object.keys(modelMetadata)) if (!models.includes(id)) delete modelMetadata[id];
   return {
     id,
     displayName: asString(value.displayName, existing?.displayName || id),
@@ -175,7 +237,8 @@ function routeInput(raw, existing) {
     apiKeyEnv,
     priority: Number.isFinite(Number(value.priority)) ? Number(value.priority) : existing?.priority ?? 0,
     backup: value.backup === true,
-    models: [...new Set(models)],
+    models,
+    modelMetadata,
     modelAliases: value.modelAliases && typeof value.modelAliases === 'object' ? { ...value.modelAliases } : existing?.modelAliases ?? {},
     headers: value.headers && typeof value.headers === 'object' ? { ...value.headers } : existing?.headers ?? {}
   };
@@ -197,10 +260,15 @@ class RelayRuntime {
       root: join(dirname(filename), 'provider-hub', 'sidecar'),
       port: this.config.accountService.port,
       credentials: this.ctx.credentials,
-      onStateChange: () => this.refreshRouter()
+      onStateChange: () => {
+        this.refreshRouter();
+        void this.syncManagedProvider().catch(() => {});
+      }
     });
     this.disposed = false;
     this.sidecarStartPromise = undefined;
+    this.managedProviderState = { status: 'pending', available: false, modelCount: 0 };
+    this.managedProviderSync = Promise.resolve();
     this.refreshRouter();
   }
 
@@ -215,6 +283,7 @@ class RelayRuntime {
       priority: this.config.accountService.priority,
       backup: false,
       models: this.sidecar.models.map((model) => model.id),
+      modelMetadata: Object.fromEntries(this.sidecar.models.map((model) => [model.id, model])),
       modelAliases: {},
       headers: {},
       internal: true
@@ -232,6 +301,101 @@ class RelayRuntime {
     else this.router = new ChannelRouter(routingConfig, (route, model, request) => this.transport(route, model, request), (entry) => this.recordAttempt(entry));
   }
 
+  settingsService() {
+    return this.ctx.reflect?.get?.('settings');
+  }
+
+  relayBaseURL() {
+    const host = this.config.listen.host === '0.0.0.0' ? '127.0.0.1' : this.config.listen.host;
+    return `http://${host}:${this.actualPort ?? this.config.listen.port}/v1`;
+  }
+
+  setManagedOwnership(owned, profile) {
+    const managed = this.config.managedProvider;
+    const nextProfile = owned && profile ? structuredClone(profile) : undefined;
+    if (managed.owned === owned && JSON.stringify(managed.lastProfile) === JSON.stringify(nextProfile)) return;
+    managed.owned = owned;
+    if (nextProfile) managed.lastProfile = nextProfile;
+    else delete managed.lastProfile;
+    persistConfig(this.filename, this.config);
+  }
+
+  async performManagedProviderSync() {
+    const managed = this.config.managedProvider;
+    const id = managed.id;
+    const models = managedModels(this.runtimeRoutes(), this.sidecar.models);
+    const settings = this.settingsService();
+    const baseState = {
+      id,
+      displayName: managed.displayName,
+      available: Boolean(settings?.mutate),
+      baseURL: this.relayBaseURL(),
+      modelCount: models.length
+    };
+    if (!settings?.mutate) {
+      this.managedProviderState = { ...baseState, status: 'unavailable', error: 'DSH settings service is unavailable' };
+      return this.managedProviderState;
+    }
+    const descriptor = settings.describe?.().find((item) => item.ns === SETTINGS_NAMESPACE);
+    const section = descriptor?.value;
+    if (!descriptor || !section || typeof section !== 'object') {
+      this.managedProviderState = { ...baseState, status: 'unavailable', error: `DSH settings namespace ${SETTINGS_NAMESPACE} is unavailable` };
+      return this.managedProviderState;
+    }
+    const existing = section.providers?.[id];
+    const userExisting = descriptor.user?.providers?.[id];
+    const keyConfigured = (await this.ctx.credentials.describe(asCredentialRef(this.config.listen.apiKeyEnv))).configured === true;
+    const profile = {
+      displayName: managed.displayName,
+      api: 'openai-completions',
+      baseURL: this.relayBaseURL(),
+      models,
+      ...(keyConfigured ? { apiKeyEnv: this.config.listen.apiKeyEnv } : {})
+    };
+    const shouldExist = managed.enabled && this.config.listen.enabled && Boolean(this.server?.listening) && models.length > 0;
+    const ownsExisting = managed.owned && managed.lastProfile && sameJson(userExisting, managed.lastProfile);
+
+    if (!shouldExist) {
+      if (existing && !ownsExisting) {
+        this.managedProviderState = { ...baseState, status: 'conflict', error: `DSH provider "${id}" is not owned by Provider Hub and was left unchanged` };
+        return this.managedProviderState;
+      }
+      if (existing) await settings.mutate(SETTINGS_NAMESPACE, [{ op: 'unset', path: ['providers', id] }], descriptor.revision);
+      this.setManagedOwnership(false);
+      this.managedProviderState = { ...baseState, status: models.length === 0 ? 'pending' : 'removed' };
+      return this.managedProviderState;
+    }
+
+    if (existing && !ownsExisting) {
+      this.managedProviderState = { ...baseState, status: 'conflict', error: `DSH provider "${id}" already exists and was left unchanged` };
+      return this.managedProviderState;
+    }
+    if (!managedProviderMatches(existing, profile)) await settings.mutate(SETTINGS_NAMESPACE, [{ op: 'set', path: ['providers', id], value: profile }], descriptor.revision);
+    this.setManagedOwnership(true, profile);
+    this.managedProviderState = { ...baseState, status: 'synced', keyConfigured };
+    return this.managedProviderState;
+  }
+
+  syncManagedProvider() {
+    const pending = this.managedProviderSync.catch(() => {}).then(async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try { return await this.performManagedProviderSync(); }
+        catch (error) {
+          if (error?.name !== 'SettingsConflictError' || attempt === 2) throw error;
+        }
+      }
+    });
+    this.managedProviderSync = pending;
+    return pending.catch((error) => {
+      this.managedProviderState = {
+        ...this.managedProviderState,
+        status: 'error',
+        error: safeLogError(error)
+      };
+      return this.managedProviderState;
+    });
+  }
+
   async secret(name) {
     return (await this.ctx.credentials.resolve(asCredentialRef(name)))?.value ?? '';
   }
@@ -239,7 +403,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.3.2', ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.4.0', ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',
@@ -273,7 +437,7 @@ class RelayRuntime {
     if (this.disposed || !this.config.accountService.enabled) return false;
     if (this.sidecarStartPromise) return this.sidecarStartPromise;
     this.sidecarStartPromise = this.sidecar.start({ install })
-      .then((running) => { this.refreshRouter(); return running; })
+      .then(async (running) => { this.refreshRouter(); await this.syncManagedProvider(); return running; })
       .finally(() => { this.sidecarStartPromise = undefined; });
     return this.sidecarStartPromise;
   }
@@ -284,6 +448,7 @@ class RelayRuntime {
       this.sidecar.phase = 'error';
       this.sidecar.error = safeLogError(error);
       this.refreshRouter();
+      void this.syncManagedProvider();
     });
   }
 
@@ -298,6 +463,7 @@ class RelayRuntime {
       this.accountSnapshot = { available: false, accounts: [], accountError: safeLogError(error) };
     }
     this.refreshRouter();
+    await this.syncManagedProvider();
     return { ...base, ...this.sidecar.snapshot(), ...this.accountSnapshot };
   }
 
@@ -320,6 +486,7 @@ class RelayRuntime {
     }
     this.accountSnapshot = undefined;
     this.refreshRouter();
+    await this.syncManagedProvider();
     return this.accountServiceState(this.sidecar.phase === 'running');
   }
 
@@ -334,6 +501,7 @@ class RelayRuntime {
     this.oauthSessions.clear();
     this.accountSnapshot = undefined;
     this.refreshRouter();
+    await this.syncManagedProvider();
     return this.accountServiceState(false);
   }
 
@@ -434,9 +602,14 @@ class RelayRuntime {
   }
 
   async start() {
-    if (!this.config.listen.enabled || this.server) return;
+    if (this.server) return;
+    if (!this.config.listen.enabled) {
+      await this.syncManagedProvider();
+      return;
+    }
     if (this.config.listen.host === '0.0.0.0' && !(await this.secret(this.config.listen.apiKeyEnv))) {
       this.startError = `LAN mode requires ${this.config.listen.apiKeyEnv} to be configured`;
+      await this.syncManagedProvider();
       return;
     }
     this.startError = undefined;
@@ -468,18 +641,22 @@ class RelayRuntime {
       this.actualPort = Number(server.address()?.port) || candidatePort;
       if (this.actualPort !== requestedPort && requestedPort !== 0) this.startNotice = `端口 ${requestedPort} 已被占用；Provider Hub 已改用 ${this.actualPort}，未停止现有服务。`;
       server.on('error', (reason) => { this.startError = safeError(reason); });
+      await this.syncManagedProvider();
       return;
     }
     if (!this.startError) this.startError = `No free port found from ${requestedPort} to ${Math.min(65535, requestedPort + 49)}`;
+    await this.syncManagedProvider();
   }
 
   async stop() {
     const server = this.server;
     this.server = undefined;
     this.actualPort = undefined;
-    if (!server || !server.listening) return;
-    server.closeAllConnections();
-    await new Promise((done) => server.close(done));
+    if (server?.listening) {
+      server.closeAllConnections();
+      await new Promise((done) => server.close(done));
+    }
+    await this.syncManagedProvider();
   }
 
   async dispose() {
@@ -489,14 +666,11 @@ class RelayRuntime {
     this.refreshRouter();
   }
 
-  async reconcile() {
+  async reconcile({ stopped = false } = {}) {
     this.refreshRouter();
     persistConfig(this.filename, this.config);
-    if (!this.config.listen.enabled) await this.stop();
-    else {
-      await this.stop();
-      await this.start();
-    }
+    if (!stopped) await this.stop();
+    if (this.config.listen.enabled) await this.start();
   }
 
   async state() {
@@ -514,8 +688,9 @@ class RelayRuntime {
         keyConfigured: clientKey.configured,
         startError: this.startError,
         startNotice: this.startNotice,
-        baseURL: `http://${this.config.listen.host === '0.0.0.0' ? '127.0.0.1' : this.config.listen.host}:${this.actualPort ?? this.config.listen.port}/v1`
+        baseURL: this.relayBaseURL()
       },
+      managedProvider: { ...this.managedProviderState },
       routing: { maxAttempts: this.config.maxAttempts, cooldownMs: this.config.cooldownMs, sessionAffinity: this.config.sessionAffinity },
       accountService: await this.accountServiceState(false),
       routes,
@@ -525,16 +700,19 @@ class RelayRuntime {
 
   async saveService(input) {
     const listen = input && typeof input === 'object' ? input : {};
-    const apiKeyEnv = asString(listen.apiKeyEnv, this.config.listen.apiKeyEnv);
+    const oldApiKeyEnv = this.config.listen.apiKeyEnv;
+    const apiKeyEnv = asString(listen.apiKeyEnv, oldApiKeyEnv);
     asCredentialRef(apiKeyEnv);
+    if (asString(listen.apiKey) && apiKeyEnv === oldApiKeyEnv) await this.ctx.credentials.set(apiKeyEnv, asString(listen.apiKey));
+    await this.stop();
     this.config.listen = {
       enabled: listen.enabled !== false,
       host: listen.host === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1',
       port: Number.isInteger(Number(listen.port)) && Number(listen.port) > 0 && Number(listen.port) <= 65535 ? Number(listen.port) : this.config.listen.port,
       apiKeyEnv
     };
-    if (asString(listen.apiKey)) await this.ctx.credentials.set(asCredentialRef(apiKeyEnv), asString(listen.apiKey));
-    await this.reconcile();
+    if (asString(listen.apiKey) && apiKeyEnv !== oldApiKeyEnv) await this.ctx.credentials.set(apiKeyEnv, asString(listen.apiKey));
+    await this.reconcile({ stopped: true });
     return this.state();
   }
 
@@ -548,6 +726,7 @@ class RelayRuntime {
     if (asString(input?.apiKey)) await this.ctx.credentials.set(asCredentialRef(route.apiKeyEnv), asString(input.apiKey));
     persistConfig(this.filename, this.config);
     this.refreshRouter();
+    await this.syncManagedProvider();
     return this.state();
   }
 
@@ -557,6 +736,7 @@ class RelayRuntime {
     const [removed] = this.config.routes.splice(index, 1);
     persistConfig(this.filename, this.config);
     this.refreshRouter();
+    await this.syncManagedProvider();
     return this.state();
   }
 
@@ -631,6 +811,15 @@ export async function apply(ctx, rawConfig = {}) {
   await runtime.start();
   runtime.startAccountServiceInBackground();
   ctx.effect(() => () => runtime.dispose(), 'dsh-provider-hub: owned services');
+  ctx.on('credentials/updated', (ref) => {
+    if (String(ref) === runtime.config.listen.apiKeyEnv) void runtime.syncManagedProvider();
+  });
+  ctx.on('settings/document-updated', (ns) => {
+    if (ns === SETTINGS_NAMESPACE) void runtime.syncManagedProvider();
+  });
+  ctx.inject(['settings'], () => {
+    void runtime.syncManagedProvider();
+  });
   ctx.inject(['webServer'], (webCtx) => {
     webCtx.effect(() => [
       webCtx.webServer.register({ kind: 'prefix', path: MANAGEMENT_PREFIX, handler: (req, res) => managementHandler(req, res, runtime, MANAGEMENT_PREFIX) }),

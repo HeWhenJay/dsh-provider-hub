@@ -193,7 +193,18 @@ export class ProviderSidecar {
       const response = await fetch(`http://127.0.0.1:${port}/v1/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(2500) });
       if (!response.ok) return false;
       const body = await response.json();
-      this.models = Array.isArray(body?.data) ? body.data.map((item) => ({ id: text(item?.id), name: text(item?.name ?? item?.display_name) })).filter((item) => item.id) : [];
+      this.models = Array.isArray(body?.data) ? body.data.map((item) => {
+        const id = text(item?.id);
+        const name = text(item?.name ?? item?.display_name);
+        const contextWindow = Number(item?.context_window ?? item?.context_length ?? item?.contextWindow);
+        const maxTokens = Number(item?.max_output_tokens ?? item?.max_tokens ?? item?.maxTokens);
+        return {
+          id,
+          ...(name && name !== id ? { name } : {}),
+          ...(Number.isInteger(contextWindow) && contextWindow > 0 ? { contextWindow } : {}),
+          ...(Number.isInteger(maxTokens) && maxTokens > 0 ? { maxTokens } : {})
+        };
+      }).filter((item) => item.id) : [];
       return true;
     } catch { return false; }
   }

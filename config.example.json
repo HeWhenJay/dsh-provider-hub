@@ -15,6 +15,11 @@
     "port": 19629,
     "priority": 1000
   },
+  "managedProvider": {
+    "enabled": true,
+    "id": "provider-hub",
+    "displayName": "Provider Hub"
+  },
   "routes": [
     {
       "id": "openai-official",

@@ -21,11 +21,43 @@ function credentials(values = {}) {
   };
 }
 
-function runtime(config, credentialValues = {}) {
+function settings(value = { providers: {} }) {
+  let section = structuredClone(value);
+  const calls = [];
+  let revision = 0;
+  let beforeMutate;
+  return {
+    calls,
+    get(ns) { return ns === 'llm-pi-ai' ? structuredClone(section) : undefined; },
+    describe() { return [{ ns: 'llm-pi-ai', value: structuredClone(section), user: structuredClone(section), revision }]; },
+    async mutate(ns, ops, expectedRevision) {
+      if (beforeMutate) { const hook = beforeMutate; beforeMutate = undefined; hook(); }
+      if (expectedRevision !== revision) throw Object.assign(new Error('settings changed'), { name: 'SettingsConflictError' });
+      assert.equal(ns, 'llm-pi-ai');
+      calls.push(structuredClone(ops));
+      for (const op of ops) {
+        let parent = section;
+        for (const part of op.path.slice(0, -1)) parent = parent[part] ??= {};
+        const key = op.path.at(-1);
+        if (op.op === 'set') parent[key] = structuredClone(op.value);
+        else delete parent[key];
+      }
+      revision += 1;
+    },
+    replaceSection(value) { section = structuredClone(value); revision += 1; },
+    beforeNextMutate(callback) { beforeMutate = callback; },
+    snapshot() { return structuredClone(section); }
+  };
+}
+
+function runtime(config, credentialValues = {}, settingsService) {
   const dir = mkdtempSync(join(tmpdir(), 'provider-hub-test-'));
-  const ctx = { credentials: credentials(credentialValues) };
+  const ctx = {
+    credentials: credentials(credentialValues),
+    reflect: { get(name) { return name === 'settings' ? settingsService : undefined; } }
+  };
   const instance = new RelayRuntime(ctx, normalizeConfig(config), join(dir, 'provider-hub.json'));
-  return { instance, ctx, dir, dispose: async () => { await instance.dispose(); rmSync(dir, { recursive: true, force: true }); } };
+  return { instance, ctx, dir, settings: settingsService, dispose: async () => { await instance.dispose(); rmSync(dir, { recursive: true, force: true }); } };
 }
 
 async function withServer(handler, run) {
@@ -257,4 +289,134 @@ test('LAN mode refuses to start without a client key', async () => {
     assert.equal(fixture.instance.server, undefined);
     assert.match(fixture.instance.startError, /requires CLIENT_KEY/);
   } finally { await fixture.dispose(); }
+});
+
+test('managed DSH provider uses the actual fallback port and preserves unrelated providers', async () => {
+  const occupied = createServer((_req, res) => res.end('keep-running'));
+  occupied.listen(0, '127.0.0.1');
+  await once(occupied, 'listening');
+  const preferredPort = occupied.address().port;
+  const settingsService = settings({ providers: { 'local-cockpit': { baseURL: 'http://127.0.0.1:58966/v1', api: 'openai-completions', models: [{ id: 'gpt-existing' }] }, fastapi: { baseURL: 'https://fastapi.invalid/v1', api: 'openai-completions', models: [{ id: 'gpt-fast' }] } } });
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: preferredPort, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', displayName: 'A', baseURL: 'https://a.invalid/v1', models: ['gpt-a', 'gpt-shared'] }, { id: 'b', displayName: 'B', baseURL: 'https://b.invalid/v1', models: ['gpt-shared', 'gpt-b'] }] }, {}, settingsService);
+  try {
+    await fixture.instance.start();
+    const providers = settingsService.snapshot().providers;
+    assert.notEqual(fixture.instance.actualPort, preferredPort);
+    assert.equal(providers['provider-hub'].baseURL, `http://127.0.0.1:${fixture.instance.actualPort}/v1`);
+    assert.equal(providers['provider-hub'].api, 'openai-completions');
+    assert.equal('apiKeyEnv' in providers['provider-hub'], false);
+    assert.deepEqual(providers['provider-hub'].models.map((model) => model.id), ['gpt-a', 'gpt-shared', 'gpt-b']);
+    assert.equal(providers['local-cockpit'].models[0].id, 'gpt-existing');
+    assert.equal(providers.fastapi.models[0].id, 'gpt-fast');
+    assert.equal(fixture.instance.managedProviderState.status, 'synced');
+    assert.equal(await (await fetch(`http://127.0.0.1:${preferredPort}`)).text(), 'keep-running');
+  } finally {
+    await fixture.dispose();
+    occupied.closeAllConnections();
+    await new Promise((done) => occupied.close(done));
+  }
+});
+
+test('managed DSH provider includes the relay credential reference only when configured', async () => {
+  const settingsService = settings();
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, { CLIENT_KEY: 'ph-client-secret' }, settingsService);
+  try {
+    await fixture.instance.start();
+    assert.equal(settingsService.snapshot().providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
+  } finally { await fixture.dispose(); }
+});
+
+test('managed DSH provider removes only its owned entry when models become empty', async () => {
+  const settingsService = settings({ providers: { fastapi: { baseURL: 'https://fastapi.invalid/v1', api: 'openai-completions', models: [{ id: 'gpt-fast' }] } } });
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, {}, settingsService);
+  try {
+    await fixture.instance.start();
+    assert.ok(settingsService.snapshot().providers['provider-hub']);
+    fixture.instance.config.routes[0].models = [];
+    fixture.instance.refreshRouter();
+    await fixture.instance.syncManagedProvider();
+    const providers = settingsService.snapshot().providers;
+    assert.equal(providers['provider-hub'], undefined);
+    assert.equal(providers.fastapi.models[0].id, 'gpt-fast');
+    assert.equal(fixture.instance.managedProviderState.status, 'pending');
+  } finally { await fixture.dispose(); }
+});
+
+test('stopping the relay removes its owned DSH provider without touching peers', async () => {
+  const settingsService = settings({ providers: { fastapi: { baseURL: 'https://fastapi.invalid/v1', api: 'openai-completions', models: [{ id: 'gpt-fast' }] } } });
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, {}, settingsService);
+  try {
+    await fixture.instance.start();
+    assert.ok(settingsService.snapshot().providers['provider-hub']);
+    await fixture.instance.stop();
+    assert.equal(settingsService.snapshot().providers['provider-hub'], undefined);
+    assert.equal(settingsService.snapshot().providers.fastapi.models[0].id, 'gpt-fast');
+  } finally { await fixture.dispose(); }
+});
+
+test('managed DSH provider does not overwrite an unowned conflicting route', async () => {
+  const userProvider = { displayName: 'User Provider Hub', baseURL: 'https://user.invalid/v1', api: 'openai-completions', models: [{ id: 'gpt-user' }] };
+  const settingsService = settings({ providers: { 'provider-hub': userProvider, fastapi: { baseURL: 'https://fastapi.invalid/v1', api: 'openai-completions', models: [{ id: 'gpt-fast' }] } } });
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, {}, settingsService);
+  try {
+    await fixture.instance.start();
+    assert.deepEqual(settingsService.snapshot().providers['provider-hub'], userProvider);
+    assert.equal(settingsService.calls.length, 0);
+    assert.equal(fixture.instance.managedProviderState.status, 'conflict');
+  } finally { await fixture.dispose(); }
+});
+
+test('an external edit to an owned provider causes a conflict instead of being reverted', async () => {
+  const settingsService = settings();
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, {}, settingsService);
+  try {
+    await fixture.instance.start();
+    const edited = settingsService.snapshot();
+    edited.providers['provider-hub'].displayName = 'User Edited Provider Hub';
+    settingsService.replaceSection(edited);
+    await fixture.instance.syncManagedProvider();
+    assert.equal(settingsService.snapshot().providers['provider-hub'].displayName, 'User Edited Provider Hub');
+    assert.equal(fixture.instance.managedProviderState.status, 'conflict');
+  } finally { await fixture.dispose(); }
+});
+
+test('settings revision conflict is re-read and a new user provider is never overwritten', async () => {
+  const settingsService = settings({ providers: {} });
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, {}, settingsService);
+  const userProvider = { displayName: 'Concurrent User Provider', baseURL: 'https://user.invalid/v1', api: 'openai-completions', models: [{ id: 'gpt-user' }] };
+  settingsService.beforeNextMutate(() => settingsService.replaceSection({ providers: { 'provider-hub': userProvider } }));
+  try {
+    await fixture.instance.start();
+    assert.deepEqual(settingsService.snapshot().providers['provider-hub'], userProvider);
+    assert.equal(fixture.instance.managedProviderState.status, 'conflict');
+  } finally { await fixture.dispose(); }
+});
+
+test('route model metadata survives save and aggregate synchronization', async () => {
+  const settingsService = settings();
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [] }, {}, settingsService);
+  try {
+    await fixture.instance.start();
+    await fixture.instance.saveRoute({ id: 'a', baseURL: 'https://a.invalid/v1', models: [{ id: 'gpt-rich', name: 'GPT Rich', contextWindow: 128000, maxTokens: 16384 }] });
+    assert.deepEqual(fixture.instance.config.routes[0].modelMetadata['gpt-rich'], { id: 'gpt-rich', name: 'GPT Rich', contextWindow: 128000, maxTokens: 16384 });
+    assert.deepEqual(settingsService.snapshot().providers['provider-hub'].models, [{ id: 'gpt-rich', name: 'GPT Rich', contextWindow: 128000, maxTokens: 16384 }]);
+  } finally { await fixture.dispose(); }
+});
+
+test('managed provider model metadata survives aggregate synchronization', async () => {
+  const settingsService = settings();
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: true, autoInstall: false }, routes: [] }, {}, settingsService);
+  fixture.instance.sidecar.phase = 'running';
+  fixture.instance.sidecar.port = 21999;
+  fixture.instance.sidecar.models = [{ id: 'gpt-account', name: 'GPT Account', contextWindow: 131072, maxTokens: 8192 }];
+  fixture.instance.refreshRouter();
+  try {
+    await fixture.instance.start();
+    assert.deepEqual(settingsService.snapshot().providers['provider-hub'].models, [{ id: 'gpt-account', name: 'GPT Account', contextWindow: 131072, maxTokens: 8192 }]);
+  } finally {
+    fixture.instance.sidecar.phase = 'stopped';
+    fixture.instance.sidecar.port = undefined;
+    fixture.instance.sidecar.models = [];
+    await fixture.dispose();
+  }
 });

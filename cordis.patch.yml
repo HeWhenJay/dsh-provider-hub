@@ -1,6 +1,7 @@
 # Add this bundle to a DSH profile after dsh-base.
-# Provider Hub owns the local/LAN HTTP gateway. DSH's built-in llm-pi-ai adapter
-# should point at http://127.0.0.1:<port>/v1 as an OpenAI-compatible provider.
+# Provider Hub owns the local/LAN HTTP gateway and automatically keeps its
+# provider-hub route in DSH's llm-pi-ai settings synchronized with the actual
+# listening port and aggregate model catalog.
 - insert:
     - id: provider-hub
       name: '@hewhenjay/dsh-provider-hub'

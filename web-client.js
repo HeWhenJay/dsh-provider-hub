@@ -76,11 +76,15 @@ window.__ModuleLoader__.load({
       const [saving, setSaving] = React.useState(false);
       const [editing, setEditing] = React.useState(false);
       if (!service) return null;
+      const managed = hub.state?.managedProvider || {};
+      const managedText = managed.status === 'synced' ? `DSH 供应商已同步（${managed.modelCount || 0} 个模型）` : managed.status === 'pending' ? 'DSH 供应商等待可用模型' : managed.status === 'conflict' ? 'DSH 同名供应商存在冲突，未覆盖' : managed.status === 'unavailable' ? 'DSH 设置服务暂不可用' : managed.status === 'removed' ? 'DSH 供应商已移除' : managed.status === 'error' ? 'DSH 供应商同步失败' : 'DSH 供应商等待同步';
       const toggle = async () => { setSaving(true); hub.setError(''); try { hub.setState(await hubApi('/service', { method: 'PUT', body: JSON.stringify({ ...service, enabled: !service.enabled }) })); } catch (error) { hub.setError(error.message); } finally { setSaving(false); } };
       return React.createElement('div', { className: 'ph-hero' },
         React.createElement('div', null,
           React.createElement('div', { className: 'ph-status' }, React.createElement(StateDot, { state: service.running ? 'done' : service.startError ? 'error' : 'warning' }), React.createElement('h2', { className: 'ph-title' }, service.running ? 'Provider Hub 运行中' : service.enabled ? 'Provider Hub 启动失败' : 'Provider Hub 已关闭')),
           React.createElement('div', { className: 'ph-sub' }, `${service.baseURL} · ${hub.state.routes.length} 个自定义渠道 · 客户端密钥${service.keyConfigured ? '已配置' : '未配置'}`),
+          React.createElement('div', { className: 'ph-help', style: { marginTop: 6 } }, managedText),
+          managed.error && React.createElement('div', { className: 'ph-error', style: { marginTop: 8 } }, managed.error),
           service.startError && React.createElement('div', { className: 'ph-error', style: { marginTop: 10 } }, service.startError),
           service.startNotice && React.createElement('div', { className: 'ph-help', style: { marginTop: 8 } }, service.startNotice)
         ),
@@ -113,9 +117,9 @@ window.__ModuleLoader__.load({
       return normalized ? `DSH_PROVIDER_HUB_${normalized}_KEY` : '';
     }
 
-    const emptyRoute = { id: '', displayName: '', baseURL: '', api: 'openai-completions', apiKeyEnv: '', apiKeyEnvManual: false, apiKey: '', priority: 100, backup: false, modelsText: '', modelAliasesText: '{}' };
+    const emptyRoute = { id: '', displayName: '', baseURL: '', api: 'openai-completions', apiKeyEnv: '', apiKeyEnvManual: false, apiKey: '', priority: 100, backup: false, modelsText: '', discoveredModels: [], modelAliasesText: '{}' };
     function RouteEditor({ route, onClose, onSaved, setError }) {
-      const [form, setForm] = React.useState(() => route ? { ...route, apiKeyEnvManual: true, apiKey: '', modelsText: (route.models || []).join(', '), modelAliasesText: JSON.stringify(route.modelAliases || {}, null, 2) } : emptyRoute);
+      const [form, setForm] = React.useState(() => route ? { ...route, apiKeyEnvManual: true, apiKey: '', modelsText: (route.models || []).join(', '), discoveredModels: Object.values(route.modelMetadata || {}), modelAliasesText: JSON.stringify(route.modelAliases || {}, null, 2) } : emptyRoute);
       const [saving, setSaving] = React.useState(false);
       const [discovering, setDiscovering] = React.useState(false);
       const [discovery, setDiscovery] = React.useState('');
@@ -140,11 +144,11 @@ window.__ModuleLoader__.load({
           if (dshApi?.llm?.discoverModels) { const response = await dshApi.llm.discoverModels(request); if (response.result.ok) models = response.result.value.models; }
           if (!models?.length) { const fallback = await hubApi('/models/discover', { method: 'POST', body: JSON.stringify(form) }); models = fallback.models; source = '供应商端点'; }
           const ids = [...new Set(models.map((item) => item.id).filter(Boolean))];
-          setForm((current) => ({ ...current, modelsText: ids.join(', ') }));
+          setForm((current) => ({ ...current, modelsText: ids.join(', '), discoveredModels: models }));
           setDiscovery(`已从${source}获取 ${ids.length} 个模型，保存渠道后生效。`);
         } catch (error) { setError(error.message); } finally { setDiscovering(false); }
       };
-      const save = async () => { setSaving(true); setError(''); try { let aliases; try { aliases = JSON.parse(form.modelAliasesText || '{}'); } catch { throw new Error('模型别名必须是有效 JSON'); } const next = await hubApi('/routes', { method: 'POST', body: JSON.stringify({ ...form, priority: Number(form.priority), models: form.modelsText.split(',').map((item) => item.trim()).filter(Boolean), modelAliases: aliases }) }); onSaved(next); onClose(); } catch (error) { setError(error.message); } finally { setSaving(false); } };
+      const save = async () => { setSaving(true); setError(''); try { let aliases; try { aliases = JSON.parse(form.modelAliasesText || '{}'); } catch { throw new Error('模型别名必须是有效 JSON'); } const modelIds = form.modelsText.split(',').map((item) => item.trim()).filter(Boolean); const discovered = new Map((form.discoveredModels || []).map((model) => [model.id, model])); const models = modelIds.map((id) => discovered.get(id) || id); const next = await hubApi('/routes', { method: 'POST', body: JSON.stringify({ ...form, priority: Number(form.priority), models, modelAliases: aliases }) }); onSaved(next); onClose(); } catch (error) { setError(error.message); } finally { setSaving(false); } };
       return React.createElement(Modal, { open: true, onClose, title: route ? '编辑供应商渠道' : '添加供应商渠道', closeLabel: '关闭渠道编辑', description: '可直接配置官方 API、中转站或任意 OpenAI-compatible 服务。', className: 'ph-modal', contentClassName: 'ph-modalBody', footer: React.createElement(React.Fragment, null, React.createElement(Button, { variant: 'ghost', onClick: onClose }, '取消'), React.createElement(Button, { variant: 'primary', disabled: saving, onClick: save }, saving ? '保存中…' : '保存渠道')) },
         React.createElement('div', { className: 'ph-form' },
           React.createElement(Field, { label: '渠道 ID', hint: '保存后不可修改。' }, React.createElement(TextInput, { value: form.id, disabled: Boolean(route), placeholder: 'openai-official', onChange: setRouteId })),

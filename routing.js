@@ -14,10 +14,19 @@ export function normalizeConfig(raw = {}) {
   const input = raw && typeof raw === 'object' ? raw : {};
   const listen = input.listen && typeof input.listen === 'object' ? input.listen : {};
   const accountService = input.accountService && typeof input.accountService === 'object' ? input.accountService : {};
+  const managedProvider = input.managedProvider && typeof input.managedProvider === 'object' ? input.managedProvider : {};
+  const managedProviderLastProfile = managedProvider.lastProfile && typeof managedProvider.lastProfile === 'object' ? managedProvider.lastProfile : undefined;
   const routes = Array.isArray(input.routes) ? input.routes : [];
   const normalizedRoutes = routes.map((route, index) => {
     const value = route && typeof route === 'object' ? route : {};
-    const models = Array.isArray(value.models) ? value.models.map((model) => asString(model)).filter(Boolean) : [];
+    const modelMetadata = value.modelMetadata && typeof value.modelMetadata === 'object' ? { ...value.modelMetadata } : {};
+    const models = [];
+    for (const rawModel of Array.isArray(value.models) ? value.models : []) {
+      const id = asString(typeof rawModel === 'string' ? rawModel : rawModel?.id);
+      if (!id || models.includes(id)) continue;
+      models.push(id);
+      if (rawModel && typeof rawModel === 'object') modelMetadata[id] = { ...rawModel, id };
+    }
     const aliases = value.modelAliases && typeof value.modelAliases === 'object' ? { ...value.modelAliases } : {};
     return {
       id: asString(value.id, `route-${index + 1}`),
@@ -27,7 +36,8 @@ export function normalizeConfig(raw = {}) {
       apiKeyEnv: asString(value.apiKeyEnv, `DSH_PROVIDER_HUB_${asString(value.id, `ROUTE_${index + 1}`).toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY`),
       priority: Number.isFinite(value.priority) ? Number(value.priority) : 0,
       backup: value.backup === true,
-      models: [...new Set(models)],
+      models,
+      modelMetadata,
       modelAliases: aliases,
       headers: value.headers && typeof value.headers === 'object' ? { ...value.headers } : {}
     };
@@ -48,6 +58,13 @@ export function normalizeConfig(raw = {}) {
       autoInstall: accountService.autoInstall !== false,
       port: Number.isInteger(accountService.port) && accountService.port > 0 && accountService.port <= 65535 ? accountService.port : 19629,
       priority: Number.isFinite(accountService.priority) ? Number(accountService.priority) : 1000
+    },
+    managedProvider: {
+      enabled: managedProvider.enabled !== false,
+      id: asString(managedProvider.id, DEFAULT_PROVIDER),
+      displayName: asString(managedProvider.displayName, 'Provider Hub'),
+      owned: managedProvider.owned === true,
+      ...(managedProviderLastProfile ? { lastProfile: { ...managedProviderLastProfile } } : {})
     },
     routes: normalizedRoutes
   };
