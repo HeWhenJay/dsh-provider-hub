@@ -12,6 +12,11 @@
   },
   "files": ["index.js", "routing.js", "cordis.patch.yml", "config.example.json", "README.md", "LICENSE"],
   "license": "CC-BY-NC-SA-4.0",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/HeWhenJay/cockpit-tools.git",
