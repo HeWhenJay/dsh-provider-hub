@@ -45,7 +45,7 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 - 聚合 OpenAI-compatible API：`/v1/models`、`/v1/chat/completions`、`/v1/responses`。
 - 自动接入 DSH Models：服务启动后按实际监听端口创建 `provider-hub` 供应商，并同步每个 Key 白名单过滤后的聚合模型目录。
 - 路由控制：优先级、普通/保底渠道、瞬时故障冷却、最大尝试次数、会话粘性和模型别名。
-- 安全凭据：实际密钥写入 DSH credentials；JSON 配置仅保存凭据引用。
+- 安全凭据：首次启动自动生成以 `Provider-Hub-` 开头的 Relay 客户端 API Key，一次性展示给用户复制；实际密钥写入 DSH credentials，JSON 配置仅保存凭据引用，用户可在服务设置中替换。
 - 脱敏日志：展示 Key 名称、模型、HTTP 状态和延迟，不记录提示词、密钥、凭据引用或完整上游 URL。
 - 非侵入端口避让：端口被占用时只选择后续空闲端口，绝不按端口结束其他进程。
 
@@ -56,20 +56,31 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.2
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.3
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.2.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.3.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.2.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.3.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.2 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.3 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 
 ![从 DSH 左侧栏打开 Provider Hub 独立页面](docs/images/provider-hub-entry.png)
+
+### 首次启动生成的客户端 Key
+
+全新安装第一次启动 Relay 时，如果 `listen.apiKeyEnv` 对应凭据不存在，Provider Hub 会生成 `Provider-Hub-<安全随机值>` 并写入 DSH credentials。独立页面顶部会一次性显示完整 Key：
+
+1. 点击 **复制 Key** 并保存到可信密码管理器；
+2. 点击 **我已保存** 后，页面立即清除内存中的明文，后续只显示“已配置”；
+3. JSON 配置与请求日志均不保存或输出完整 Key；
+4. 需要轮换时打开 **服务设置 → 新的客户端访问密钥**，输入自定义值并保存。手动值不强制使用自动前缀，避免破坏已有客户端配置。
+
+该 Key 用于访问 Provider Hub 自己的 Relay，不是供应商 API Key。DSH 自动管理的 `provider-hub` 模型供应商会使用对应凭据引用，不需要把明文复制进配置文件。
 
 ## 新用户快速上手
 
@@ -140,7 +151,7 @@ Provider Hub 默认在 `127.0.0.1:19529` 提供统一接口。服务成功启动
 - Base URL 使用页面显示的实际地址，包括端口冲突后的自动避让端口；
 - API 固定为 OpenAI Chat Completions；
 - 模型从 Provider Hub 的聚合 `/v1/models` 目录读取、去重；每个 Key 非空白名单之外的模型不会进入聚合目录，并尽可能保留名称、上下文窗口和最大输出长度；
-- 只有已配置 Provider Hub 客户端访问密钥时才写入对应 `apiKeyEnv`；
+- 首次启动会自动生成客户端访问密钥，因此自动管理的供应商会写入对应 `apiKeyEnv`；
 - 渠道、官方账号或 sidecar 模型变化后会自动重新同步。
 
 插件只管理 `provider-hub` 这一条供应商，不修改其他供应商，也不会切换 `agent-default-model`。如果用户已经手工创建了同名条目，插件会报告冲突并保持原配置不变。Relay 停止、禁用或聚合模型为空时，插件只删除经自身确认创建的条目；模型为空时状态显示为等待，不写入 DSH 无法使用的空模型供应商。
@@ -269,7 +280,7 @@ provider-hub/sidecar/
 - Relay 默认只监听 `127.0.0.1:19529`。
 - sidecar 始终只监听 `127.0.0.1`，首选 `19629`。
 - 两者发生端口冲突时都会向后寻找空闲端口，不会关闭原监听器。
-- 将 relay 改为 `0.0.0.0` 前必须配置客户端访问密钥，否则服务拒绝启动。
+- 首次启动会自动生成以 `Provider-Hub-` 开头的客户端访问密钥；改为 `0.0.0.0` 时继续使用该密钥认证。
 - 不要把 relay 直接暴露到公网；远程使用应配合防火墙、VPN 或带认证的反向代理。
 
 ## HTTP 接口
@@ -336,7 +347,7 @@ v0.3 更名为 DSH Provider Hub，并从“桥接外部 Cockpit”迁移为独�
 - **需要再次尝试**：自动任务缺少证据或失败后，打开 **模型规格** 标签并点击 **重新补全规格**。
 - **补全后是否需要重启**：不需要。规格写入后由 DSH settings 热更新；只有安装或升级 Provider Hub 插件本身时，才需要用户在方便时自行重启 `dsh web`。
 - **显示同名供应商冲突**：DSH 已存在非插件创建的 `provider-hub` 条目。插件不会覆盖它；请先在 Models 中改名或删除该条目再刷新 Provider Hub。
-- **DSH 无法访问 relay**：使用实际 Base URL；检查 relay 开关与客户端密钥。LAN 模式无密钥时服务会拒绝启动。
+- **DSH 无法访问 relay**：使用实际 Base URL；检查 relay 开关和 `DSH_PROVIDER_HUB_CLIENT_KEY` 凭据。首次自动生成的 Key 可在页面一次性复制，之后也可在服务设置中替换。
 
 ## 开发与验证
 

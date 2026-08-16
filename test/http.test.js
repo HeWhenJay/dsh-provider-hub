@@ -106,7 +106,8 @@ test('an allowlisted public alias appears in catalogs and routes to its upstream
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'alias', baseURL: 'https://alias.invalid/v1', models: ['vendor-model'], modelAllowlist: ['public-model'], modelAliases: { 'public-model': 'vendor-model' } }] }, {}, settingsService);
   try {
     await fixture.instance.start();
-    const models = await (await fetch(`${fixture.instance.relayBaseURL()}/models`)).json();
+    const key = fixture.ctx.credentials.store.get('DSH_PROVIDER_HUB_CLIENT_KEY');
+    const models = await (await fetch(`${fixture.instance.relayBaseURL()}/models`, { headers: { authorization: `Bearer ${key}` } })).json();
     assert.deepEqual(models.data.map((model) => model.id), ['public-model']);
     assert.deepEqual(settingsService.snapshot().providers['provider-hub'].models.map((model) => model.id), ['public-model']);
     assert.deepEqual(fixture.instance.router.candidates('public-model').map((route) => route.id), ['alias']);
@@ -121,7 +122,8 @@ test('models endpoint and managed DSH provider expose only the union of effectiv
   ] }, {}, settingsService);
   try {
     await fixture.instance.start();
-    const response = await fetch(`${fixture.instance.relayBaseURL()}/models`);
+    const key = fixture.ctx.credentials.store.get('DSH_PROVIDER_HUB_CLIENT_KEY');
+    const response = await fetch(`${fixture.instance.relayBaseURL()}/models`, { headers: { authorization: `Bearer ${key}` } });
     assert.equal(response.status, 200);
     assert.deepEqual((await response.json()).data.map((model) => model.id), ['gpt-a', 'gpt-b']);
     assert.deepEqual(settingsService.snapshot().providers['provider-hub'].models.map((model) => model.id), ['gpt-a', 'gpt-b']);
@@ -230,6 +232,36 @@ test('deleting a route preserves a possibly shared credential', async () => {
     assert.equal(response.status, 200);
     assert.equal(response.body.routes.length, 0);
     assert.equal(fixture.ctx.credentials.store.get('SHARED_KEY'), 'sk-shared');
+  } finally { await fixture.dispose(); }
+});
+
+test('first service start generates a prefixed client key in credentials and exposes it until acknowledged', async () => {
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [] });
+  try {
+    await fixture.instance.start();
+    const generated = fixture.ctx.credentials.store.get('CLIENT_KEY');
+    assert.match(generated, /^Provider-Hub-[A-Za-z0-9_-]{40,}$/);
+    const first = await fixture.instance.state();
+    assert.equal(first.service.generatedApiKey, generated);
+    assert.equal(first.service.keyConfigured, true);
+    assert.equal(JSON.stringify(fixture.instance.config).includes(generated), false);
+    const acknowledged = await management(fixture.instance, '/service/generated-key/acknowledge', { method: 'POST', body: '{}' });
+    assert.equal(acknowledged.status, 200);
+    assert.equal((await fixture.instance.state()).service.generatedApiKey, undefined);
+    await fixture.instance.stop();
+    await fixture.instance.start();
+    assert.equal(fixture.ctx.credentials.store.get('CLIENT_KEY'), generated);
+    assert.equal((await fixture.instance.state()).service.generatedApiKey, undefined);
+  } finally { await fixture.dispose(); }
+});
+
+test('a user can replace the generated client key through service settings', async () => {
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [] });
+  try {
+    await fixture.instance.start();
+    const response = await fixture.instance.saveService({ enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY', apiKey: 'user-selected-key' });
+    assert.equal(fixture.ctx.credentials.store.get('CLIENT_KEY'), 'user-selected-key');
+    assert.equal(response.service.generatedApiKey, undefined);
   } finally { await fixture.dispose(); }
 });
 
@@ -363,12 +395,13 @@ test('occupied relay port falls back without stopping the existing service', asy
   }
 });
 
-test('LAN mode refuses to start without a client key', async () => {
-  const fixture = runtime({ listen: { enabled: true, host: '0.0.0.0', port: 19529, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1' }] });
+test('LAN mode automatically generates a client key before listening', async () => {
+  const fixture = runtime({ listen: { enabled: true, host: '0.0.0.0', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1' }] });
   try {
     await fixture.instance.start();
-    assert.equal(fixture.instance.server, undefined);
-    assert.match(fixture.instance.startError, /requires CLIENT_KEY/);
+    assert.equal(fixture.instance.server?.listening, true);
+    assert.match(fixture.ctx.credentials.store.get('CLIENT_KEY'), /^Provider-Hub-/);
+    assert.equal(fixture.instance.startError, undefined);
   } finally { await fixture.dispose(); }
 });
 
@@ -384,7 +417,8 @@ test('concurrent service saves serialize lifecycle and leave exactly one tracked
     assert.equal(second.service.running, true);
     assert.equal(fixture.instance.server?.listening, true);
     const port = fixture.instance.actualPort;
-    assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
+    const key = fixture.ctx.credentials.store.get('CLIENT_KEY');
+    assert.equal((await fetch(`http://127.0.0.1:${port}/health`, { headers: { authorization: `Bearer ${key}` } })).status, 200);
     await fixture.instance.stop();
     await assert.rejects(fetch(`http://127.0.0.1:${port}/health`));
   } finally { await fixture.dispose(); }
@@ -403,7 +437,7 @@ test('managed DSH provider uses the actual fallback port and preserves unrelated
     assert.notEqual(fixture.instance.actualPort, preferredPort);
     assert.equal(providers['provider-hub'].baseURL, `http://127.0.0.1:${fixture.instance.actualPort}/v1`);
     assert.equal(providers['provider-hub'].api, 'openai-completions');
-    assert.equal('apiKeyEnv' in providers['provider-hub'], false);
+    assert.equal(providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
     assert.deepEqual(providers['provider-hub'].models.map((model) => model.id), ['gpt-a', 'gpt-shared', 'gpt-b']);
     assert.equal(providers['local-cockpit'].models[0].id, 'gpt-existing');
     assert.equal(providers.fastapi.models[0].id, 'gpt-fast');

@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { ChannelRouter, normalizeConfig } from './routing.js';
 import { ProviderSidecar, SIDECAR_CLIENT_KEY_ENV } from './sidecar.js';
 
@@ -381,6 +381,7 @@ class RelayRuntime {
     this.actualPort = undefined;
     this.startError = undefined;
     this.startNotice = undefined;
+    this.generatedClientKey = undefined;
     this.oauthSessions = new Map();
     this.accountSnapshot = undefined;
     this.sidecar = new ProviderSidecar({
@@ -725,10 +726,25 @@ class RelayRuntime {
     return (await this.ctx.credentials.resolve(asCredentialRef(name)))?.value ?? '';
   }
 
+  async ensureClientKey() {
+    const ref = asCredentialRef(this.config.listen.apiKeyEnv);
+    const existing = await this.secret(ref);
+    if (existing) return existing;
+    const generated = `Provider-Hub-${randomBytes(32).toString('base64url')}`;
+    await this.ctx.credentials.set(ref, generated);
+    this.generatedClientKey = generated;
+    return generated;
+  }
+
+  acknowledgeGeneratedClientKey() {
+    this.generatedClientKey = undefined;
+    return { acknowledged: true };
+  }
+
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.2', ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.3', ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',
@@ -935,6 +951,7 @@ class RelayRuntime {
       await this.syncManagedProvider();
       return;
     }
+    await this.ensureClientKey();
     if (this.config.listen.host === '0.0.0.0' && !(await this.secret(this.config.listen.apiKeyEnv))) {
       this.startError = `LAN mode requires ${this.config.listen.apiKeyEnv} to be configured`;
       await this.syncManagedProvider();
@@ -1017,6 +1034,7 @@ class RelayRuntime {
         actualPort: this.actualPort ?? this.config.listen.port,
         apiKeyEnv: this.config.listen.apiKeyEnv,
         keyConfigured: clientKey.configured,
+        generatedApiKey: this.generatedClientKey,
         startError: this.startError,
         startNotice: this.startNotice,
         baseURL: this.relayBaseURL()
@@ -1044,6 +1062,7 @@ class RelayRuntime {
       apiKeyEnv
     };
     if (asString(listen.apiKey) && apiKeyEnv !== oldApiKeyEnv) await this.ctx.credentials.set(apiKeyEnv, asString(listen.apiKey));
+    if (asString(listen.apiKey)) this.generatedClientKey = undefined;
     await this.reconcile({ stopped: true });
     return this.state();
   }
@@ -1104,6 +1123,7 @@ async function managementHandler(req, res, runtime, prefix = MANAGEMENT_PREFIX) 
     const requestURL = new URL(req.url ?? '/', 'http://dsh.local');
     const body = ['POST', 'PUT', 'PATCH'].includes(req.method ?? '') ? await readJsonRequest(req) : {};
     if (req.method === 'PUT' && pathname === '/service') return sendJson(res, 200, await runtime.saveService(body));
+    if (req.method === 'POST' && pathname === '/service/generated-key/acknowledge') return sendJson(res, 200, runtime.acknowledgeGeneratedClientKey());
     if (req.method === 'GET' && pathname === '/account-service') return sendJson(res, 200, await runtime.accountServiceState(false));
     if (req.method === 'PUT' && pathname === '/account-service') return sendJson(res, 200, await runtime.setAccountService(body));
     if (req.method === 'POST' && pathname === '/account-service/install') return sendJson(res, 200, await runtime.installAccountService());
