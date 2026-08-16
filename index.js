@@ -17,13 +17,13 @@ function routeModel(route, model) {
 }
 
 function routeEndpoint(route, endpoint) {
-  const suffix = endpoint === 'responses' || route.api === 'openai-responses' ? '/responses' : '/chat/completions';
+  const suffix = endpoint === 'responses' ? '/responses' : '/chat/completions';
   return `${route.baseURL}${suffix}`;
 }
 
 function routeHeaders(route) {
   const key = envKey(route.apiKeyEnv);
-  const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-cockpit-relay/0.1.0', ...route.headers };
+  const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-cockpit-relay/0.1.1', ...route.headers };
   if (key) headers.authorization = `Bearer ${key}`;
   return headers;
 }

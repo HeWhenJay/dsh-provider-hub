@@ -1,6 +1,6 @@
 {
   "name": "@hewhenjay/dsh-cockpit-relay",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local and LAN DSH LLM relay with Cockpit-inspired priority and fallback routing",
   "type": "module",
   "main": "index.js",

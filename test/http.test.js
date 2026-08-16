@@ -53,3 +53,26 @@ test('chat endpoint fails over and preserves upstream streaming bytes', async ()
   });
   assert.deepEqual(calls, ['cheap', 'backup']);
 });
+
+test('chat and responses endpoints preserve their client protocol path', async () => {
+  const seen = [];
+  const config = normalizeConfig({
+    listen: { host: '127.0.0.1', apiKeyEnv: 'UNSET_TEST_CLIENT_KEY' },
+    routes: [{ id: 'both', baseURL: 'https://both.invalid/v1', api: 'openai-responses', models: ['gpt-test'] }]
+  });
+  const router = new ChannelRouter(config, async (_route, _model, request) => {
+    seen.push(request.endpoint);
+    return new Response('{}', { headers: { 'content-type': 'application/json' } });
+  });
+  await withServer((req, res) => webHandler(req, res, config, router), async (url) => {
+    for (const path of ['/v1/chat/completions', '/v1/responses']) {
+      const response = await fetch(`${url}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'gpt-test' })
+      });
+      assert.equal(response.status, 200);
+    }
+  });
+  assert.deepEqual(seen, ['chat', 'responses']);
+});
