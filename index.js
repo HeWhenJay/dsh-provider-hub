@@ -153,13 +153,18 @@ function publicRoute(route, credential) {
   };
 }
 
+function generatedRouteCredentialRef(id) {
+  return `DSH_PROVIDER_HUB_${id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY`;
+}
+
 function routeInput(raw, existing) {
   const value = raw && typeof raw === 'object' ? raw : {};
   const id = asString(value.id, existing?.id);
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)) throw new Error('route id must use letters, numbers, _ or -');
   const baseURL = asString(value.baseURL, existing?.baseURL).replace(/\/+$/, '');
   if (!/^https?:\/\//i.test(baseURL)) throw new Error('baseURL must start with http:// or https://');
-  const apiKeyEnv = asString(value.apiKeyEnv, existing?.apiKeyEnv || `DSH_PROVIDER_HUB_${id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY`);
+  const suppliedApiKeyEnv = asString(value.apiKeyEnv);
+  const apiKeyEnv = suppliedApiKeyEnv || existing?.apiKeyEnv || generatedRouteCredentialRef(id);
   asCredentialRef(apiKeyEnv);
   const models = Array.isArray(value.models) ? value.models.map((item) => asString(item)).filter(Boolean) : existing?.models ?? [];
   return {
@@ -234,7 +239,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.3.1', ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.3.2', ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',
@@ -634,4 +639,4 @@ export async function apply(ctx, rawConfig = {}) {
   });
 }
 
-export { ChannelRouter, RelayRuntime, normalizeConfig, loadConfig, managementHandler, routeInput };
+export { ChannelRouter, RelayRuntime, normalizeConfig, generatedRouteCredentialRef, loadConfig, managementHandler, routeInput };

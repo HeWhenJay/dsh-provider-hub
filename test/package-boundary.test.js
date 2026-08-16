@@ -34,6 +34,8 @@ test('web client contains only the built-in account service contract', () => {
   assert.doesNotMatch(source, /\/cockpit|CockpitBridge|CockpitEditor|Cockpit 账号池/);
   assert.match(source, /Lucide \"Network\"/);
   assert.match(source, /icon: ProviderHubIcon/);
+  assert.match(source, /generatedCredentialRef/);
+  assert.match(source, /setRouteId/);
   assert.doesNotMatch(source, /IconSettingsOutline/);
 });
 

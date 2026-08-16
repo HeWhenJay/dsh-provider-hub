@@ -86,16 +86,27 @@ test('request logs redact URLs, headers, and secret-shaped values', async () => 
   } finally { await fixture.dispose(); }
 });
 
-test('management API stores keys through credential service without serializing them', async () => {
+test('management API generates a credential ref when the client submits an empty string', async () => {
   const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1', apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [] });
   try {
-    const response = await management(fixture.instance, '/routes', { method: 'POST', body: JSON.stringify({ id: 'cheap-a', displayName: 'Cheap A', baseURL: 'https://a.invalid/v1', apiKey: 'sk-private', models: ['gpt-test'] }) });
-    assert.equal(response.status, 200);
+    const response = await management(fixture.instance, '/routes', { method: 'POST', body: JSON.stringify({ id: 'cheap-a', displayName: 'Cheap A', baseURL: 'https://a.invalid/v1', apiKeyEnv: '', apiKey: 'sk-private', models: ['gpt-test'] }) });
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.equal(response.body.routes[0].apiKeyEnv, 'DSH_PROVIDER_HUB_CHEAP_A_KEY');
     assert.equal(response.body.routes[0].keyConfigured, true);
     assert.equal(fixture.ctx.credentials.store.get('DSH_PROVIDER_HUB_CHEAP_A_KEY'), 'sk-private');
     const persisted = readFileSync(join(fixture.dir, 'provider-hub.json'), 'utf8');
     assert.doesNotMatch(persisted, /sk-private/);
     assert.match(persisted, /DSH_PROVIDER_HUB_CHEAP_A_KEY/);
+  } finally { await fixture.dispose(); }
+});
+
+test('editing a route with an empty credential field preserves its existing reference', async () => {
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', displayName: 'A', baseURL: 'https://a.invalid/v1', apiKeyEnv: 'SHARED_KEY', models: ['gpt-test'] }] }, { SHARED_KEY: 'sk-shared' });
+  try {
+    const response = await management(fixture.instance, '/routes', { method: 'POST', body: JSON.stringify({ id: 'a', displayName: 'A edited', baseURL: 'https://a.invalid/v1', apiKeyEnv: '', models: ['gpt-test'] }) });
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.equal(response.body.routes[0].apiKeyEnv, 'SHARED_KEY');
+    assert.equal(response.body.routes[0].displayName, 'A edited');
   } finally { await fixture.dispose(); }
 });
 

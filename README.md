@@ -23,16 +23,16 @@
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.3.1
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.3.2
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.3.1.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.3.2.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.3.1.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.3.2.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.3.1 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.3.2 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏底部的 **Provider Hub** 或 **Settings → Provider Hub** 进入。
 
@@ -63,12 +63,12 @@ Provider Hub 只在 `127.0.0.1` 上临时监听对应端口并校验 OAuth state
 1. 打开 **供应商** 标签并点击 **添加供应商**。
 2. 填写渠道 ID、显示名称和 Base URL（通常到 `/v1`）。
 3. 选择 Chat Completions 或 Responses 协议。
-4. 填写凭据变量名与 API Key。
+4. 填写 API Key；凭据变量名会随渠道 ID 自动生成，需要复用现有凭据时再手动修改。
 5. 点击 **获取全部模型**；可在保存前编辑结果。
 6. 设置优先级；如需最后兜底，勾选 **作为保底渠道**。
 7. 保存后使用卡片上的 **测试** 验证首个模型。
 
-新渠道的默认凭据引用是 `DSH_PROVIDER_HUB_<CHANNEL_ID>_KEY`。API Key 只写入 DSH credentials；保存后的 `provider-hub.json` 不包含明文密钥。
+新渠道的默认凭据引用是 `DSH_PROVIDER_HUB_<CHANNEL_ID>_KEY`：渠道 ID 会转成大写，所有非字母数字字符替换为下划线，例如 `openai-official` → `DSH_PROVIDER_HUB_OPENAI_OFFICIAL_KEY`。即使旧版前端提交空字符串，Host 也会执行同一回退。API Key 只写入 DSH credentials；保存后的 `provider-hub.json` 不包含明文密钥。
 
 ## 接入 DSH Models
 

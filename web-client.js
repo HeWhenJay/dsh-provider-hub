@@ -108,13 +108,29 @@ window.__ModuleLoader__.load({
       );
     }
 
-    const emptyRoute = { id: '', displayName: '', baseURL: '', api: 'openai-completions', apiKeyEnv: '', apiKey: '', priority: 100, backup: false, modelsText: '', modelAliasesText: '{}' };
+    function generatedCredentialRef(id) {
+      const normalized = String(id || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+      return normalized ? `DSH_PROVIDER_HUB_${normalized}_KEY` : '';
+    }
+
+    const emptyRoute = { id: '', displayName: '', baseURL: '', api: 'openai-completions', apiKeyEnv: '', apiKeyEnvManual: false, apiKey: '', priority: 100, backup: false, modelsText: '', modelAliasesText: '{}' };
     function RouteEditor({ route, onClose, onSaved, setError }) {
-      const [form, setForm] = React.useState(() => route ? { ...route, apiKey: '', modelsText: (route.models || []).join(', '), modelAliasesText: JSON.stringify(route.modelAliases || {}, null, 2) } : emptyRoute);
+      const [form, setForm] = React.useState(() => route ? { ...route, apiKeyEnvManual: true, apiKey: '', modelsText: (route.models || []).join(', '), modelAliasesText: JSON.stringify(route.modelAliases || {}, null, 2) } : emptyRoute);
       const [saving, setSaving] = React.useState(false);
       const [discovering, setDiscovering] = React.useState(false);
       const [discovery, setDiscovery] = React.useState('');
       const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
+      const setRouteId = (event) => {
+        const id = event.target.value;
+        setForm((current) => ({ ...current, id, ...(current.apiKeyEnvManual ? {} : { apiKeyEnv: generatedCredentialRef(id) }) }));
+      };
+      const setCredentialRef = (event) => {
+        const apiKeyEnv = event.target.value;
+        setForm((current) => {
+          const manual = Boolean(apiKeyEnv.trim());
+          return { ...current, apiKeyEnv: manual ? apiKeyEnv : generatedCredentialRef(current.id), apiKeyEnvManual: manual };
+        });
+      };
       const discover = async () => {
         setDiscovering(true); setDiscovery(''); setError('');
         const request = { settingsNs: 'llm-pi-ai', baseURL: form.baseURL, api: form.api, ...(form.apiKey ? { apiKey: form.apiKey } : {}) };
@@ -131,10 +147,10 @@ window.__ModuleLoader__.load({
       const save = async () => { setSaving(true); setError(''); try { let aliases; try { aliases = JSON.parse(form.modelAliasesText || '{}'); } catch { throw new Error('模型别名必须是有效 JSON'); } const next = await hubApi('/routes', { method: 'POST', body: JSON.stringify({ ...form, priority: Number(form.priority), models: form.modelsText.split(',').map((item) => item.trim()).filter(Boolean), modelAliases: aliases }) }); onSaved(next); onClose(); } catch (error) { setError(error.message); } finally { setSaving(false); } };
       return React.createElement(Modal, { open: true, onClose, title: route ? '编辑供应商渠道' : '添加供应商渠道', closeLabel: '关闭渠道编辑', description: '可直接配置官方 API、中转站或任意 OpenAI-compatible 服务。', className: 'ph-modal', contentClassName: 'ph-modalBody', footer: React.createElement(React.Fragment, null, React.createElement(Button, { variant: 'ghost', onClick: onClose }, '取消'), React.createElement(Button, { variant: 'primary', disabled: saving, onClick: save }, saving ? '保存中…' : '保存渠道')) },
         React.createElement('div', { className: 'ph-form' },
-          React.createElement(Field, { label: '渠道 ID', hint: '保存后不可修改。' }, React.createElement(TextInput, { value: form.id, disabled: Boolean(route), placeholder: 'openai-official', onChange: set('id') })),
+          React.createElement(Field, { label: '渠道 ID', hint: '保存后不可修改。' }, React.createElement(TextInput, { value: form.id, disabled: Boolean(route), placeholder: 'openai-official', onChange: setRouteId })),
           React.createElement(Field, { label: '显示名称' }, React.createElement(TextInput, { value: form.displayName, placeholder: 'OpenAI 官方', onChange: set('displayName') })),
           React.createElement(Field, { label: 'Base URL', hint: '通常填写到 /v1；模型发现会自动请求 /models。', wide: true }, React.createElement(TextInput, { value: form.baseURL, placeholder: 'https://api.openai.com/v1', onChange: set('baseURL') })),
-          React.createElement(Field, { label: '凭据变量名' }, React.createElement(TextInput, { value: form.apiKeyEnv, placeholder: 'OPENAI_API_KEY（可自动生成）', onChange: set('apiKeyEnv') })),
+          React.createElement(Field, { label: '凭据变量名', hint: '随渠道 ID 自动生成；需要共享现有凭据时可手动修改。' }, React.createElement(TextInput, { value: form.apiKeyEnv, placeholder: '输入渠道 ID 后自动生成', onChange: setCredentialRef })),
           React.createElement(Field, { label: 'API Key', hint: '只写入 DSH credentials。' }, React.createElement(TextInput, { type: 'password', value: form.apiKey, placeholder: route?.keyConfigured ? '已配置；留空保持不变' : '输入供应商 API Key', onChange: set('apiKey') })),
           React.createElement(Field, { label: '优先级' }, React.createElement(TextInput, { type: 'number', value: form.priority, onChange: set('priority') })),
           React.createElement(Field, { label: '协议' }, React.createElement(Dropdown, { value: form.api, label: '供应商协议', options: [{ id: 'openai-completions', label: 'OpenAI Chat Completions' }, { id: 'openai-responses', label: 'OpenAI Responses' }], onChange: (api) => setForm((current) => ({ ...current, api })) })),
