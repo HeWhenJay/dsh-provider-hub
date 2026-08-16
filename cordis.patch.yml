@@ -4,5 +4,7 @@
 - insert:
     - id: cockpit-relay
       name: '@hewhenjay/dsh-cockpit-relay'
+      inject:
+        - credentials
       config:
-        configFile: !!js process.env.DSH_COCKPIT_CONFIG || 'cockpit-relay.json'
+        configFile: !!js process.env.DSH_COCKPIT_CONFIG || dshHomePath('cockpit-relay.json')

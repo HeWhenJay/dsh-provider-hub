@@ -1,30 +1,46 @@
 {
   "name": "@hewhenjay/dsh-cockpit-relay",
-  "version": "0.1.1",
-  "description": "Local and LAN DSH LLM relay with Cockpit-inspired priority and fallback routing",
+  "version": "0.2.1",
+  "description": "Local and LAN DSH LLM relay with a native Web management console, priority and fallback routing",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
+    "./client": "./web-client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./config.example.json": "./config.example.json",
-    "./routing": "./routing.js"
+    "./routing": "./routing.js",
+    "./package.json": "./package.json"
   },
-  "files": ["index.js", "routing.js", "cordis.patch.yml", "config.example.json", "README.md", "LICENSE"],
+  "files": ["index.js", "routing.js", "web-client.js", "cordis.patch.yml", "config.example.json", "README.md", "LICENSE"],
   "license": "CC-BY-NC-SA-4.0",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
     }
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/HeWhenJay/cockpit-tools.git",
-    "directory": "dsh-plugin"
+    "url": "git+https://github.com/HeWhenJay/dsh-cockpit-relay.git"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-sidebar": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.6",
+    "react": "^18.2.0"
   },
   "engines": { "node": ">=20" },
   "scripts": {

@@ -23,7 +23,7 @@ export function normalizeConfig(raw = {}) {
       displayName: asString(value.displayName, asString(value.id, `Route ${index + 1}`)),
       baseURL: asString(value.baseURL).replace(/\/+$/, ''),
       api: value.api === 'openai-responses' ? 'openai-responses' : 'openai-completions',
-      apiKeyEnv: asString(value.apiKeyEnv),
+      apiKeyEnv: asString(value.apiKeyEnv, `COCKPIT_RELAY_${asString(value.id, `ROUTE_${index + 1}`).toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY`),
       priority: Number.isFinite(value.priority) ? Number(value.priority) : 0,
       backup: value.backup === true,
       models: [...new Set(models)],
@@ -52,9 +52,10 @@ function modelMatches(route, model) {
 }
 
 export class ChannelRouter {
-  constructor(config, transport) {
+  constructor(config, transport, onAttempt) {
     this.config = config;
     this.transport = transport;
+    this.onAttempt = onAttempt;
     this.cooldowns = new Map();
     this.affinity = new Map();
   }
@@ -95,6 +96,7 @@ export class ChannelRouter {
     }
     let lastError;
     for (const route of candidates) {
+      const startedAt = Date.now();
       try {
         const result = await operation(route, model, request);
         if (result instanceof Response && !result.ok) {
@@ -104,10 +106,12 @@ export class ChannelRouter {
           throw error;
         }
         this.markSuccess(route, sessionId);
+        this.onAttempt?.({ route, model, ok: true, status: result instanceof Response ? result.status : 200, latencyMs: Date.now() - startedAt });
         return { result, route };
       } catch (error) {
         lastError = error;
         this.markFailure(route, error);
+        this.onAttempt?.({ route, model, ok: false, status: Number(error?.status) || 0, latencyMs: Date.now() - startedAt, error });
       }
     }
     const error = new Error(`all configured channels failed for model "${model}"`);
