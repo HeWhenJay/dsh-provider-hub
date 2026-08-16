@@ -40,7 +40,10 @@ test('web client contains only the built-in account service contract', () => {
   assert.match(source, /generatedCredentialRef/);
   assert.match(source, /setRouteId/);
   assert.match(source, /DSH 供应商已同步/);
-  assert.match(source, /补全模型规格/);
+  assert.match(source, /重新补全规格/);
+  assert.match(source, /模型规格/);
+  assert.match(source, /ModelSpecifications/);
+  assert.match(source, /container-name:providerHub/);
   assert.match(source, /\/models\/research/);
   assert.match(source, /API Key 名称|modelAllowlistText/);
   assert.doesNotMatch(source, /IconSettingsOutline/);
@@ -69,7 +72,7 @@ test('packed tarball includes every runtime module and imports cleanly', () => {
     assert.ok(files.includes('sidecar.js'));
     assert.ok(files.includes('index.js'));
     assert.ok(files.includes('web-client.js'));
-    for (const image of ['provider-hub-entry.png', 'provider-hub-dashboard.png', 'provider-hub-add-route.png', 'provider-hub-route-allowlist.png', 'provider-hub-accounts.png']) {
+    for (const image of ['provider-hub-entry.png', 'provider-hub-dashboard.png', 'provider-hub-add-route.png', 'provider-hub-route-allowlist.png', 'provider-hub-model-specs.png', 'provider-hub-accounts.png']) {
       assert.ok(files.includes(`docs/images/${image}`));
     }
     execFileSync('tar.exe', ['-xf', tarball, '-C', destination]);
