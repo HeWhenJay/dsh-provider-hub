@@ -23,16 +23,16 @@
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.3.0
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.3.1
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.3.0.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.3.1.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.3.0.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.3.1.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.3.0 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.3.1 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏底部的 **Provider Hub** 或 **Settings → Provider Hub** 进入。
 
@@ -246,4 +246,4 @@ npm pack --dry-run
 
 ## 许可与第三方组件
 
-Provider Hub 插件代码按仓库 `LICENSE`（CC BY-NC-SA 4.0）发布。内置账号服务二进制不打进 npm 包；首次使用时从 CLIProxyAPI 官方 Release 下载。CLIProxyAPI 由其作者按 MIT License 发布。使用官方账号、API Key、中转服务和多账号路由时，请遵守对应平台服务条款、账号政策和当地法律。
+Provider Hub 插件代码按仓库 `LICENSE`（CC BY-NC-SA 4.0）发布。设置导航中的 Network 图标来自 [Lucide](https://lucide.dev/icons/network)，按 ISC License 使用。内置账号服务二进制不打进 npm 包；首次使用时从 CLIProxyAPI 官方 Release 下载。CLIProxyAPI 由其作者按 MIT License 发布。使用官方账号、API Key、中转服务和多账号路由时，请遵守对应平台服务条款、账号政策和当地法律。

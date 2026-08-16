@@ -234,7 +234,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.3.0', ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.3.1', ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',

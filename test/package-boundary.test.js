@@ -32,6 +32,9 @@ test('web client contains only the built-in account service contract', () => {
   assert.match(source, /\/account-service\/oauth/);
   assert.match(source, /内置官方账号服务/);
   assert.doesNotMatch(source, /\/cockpit|CockpitBridge|CockpitEditor|Cockpit 账号池/);
+  assert.match(source, /Lucide \"Network\"/);
+  assert.match(source, /icon: ProviderHubIcon/);
+  assert.doesNotMatch(source, /IconSettingsOutline/);
 });
 
 test('web client registers through the browser module loader', () => {
