@@ -1,0 +1,6 @@
+# Add this bundle to a DSH profile after dsh-base.
+- insert:
+    - id: cockpit-relay
+      name: '@hewhenjay/dsh-cockpit-relay'
+      config:
+        configFile: !!js process.env.DSH_COCKPIT_CONFIG || 'cockpit-relay.json'

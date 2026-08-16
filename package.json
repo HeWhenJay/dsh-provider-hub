@@ -1,0 +1,29 @@
+{
+  "name": "@hewhenjay/dsh-cockpit-relay",
+  "version": "0.1.0",
+  "description": "Local and LAN DSH LLM relay with Cockpit-inspired priority and fallback routing",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./config.example.json": "./config.example.json",
+    "./routing": "./routing.js"
+  },
+  "files": ["index.js", "cordis.patch.yml", "config.example.json", "README.md", "LICENSE"],
+  "license": "CC-BY-NC-SA-4.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HeWhenJay/cockpit-tools.git",
+    "directory": "dsh-plugin"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6"
+  },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

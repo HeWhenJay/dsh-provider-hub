@@ -1,0 +1,6 @@
+Copyright (c) 2026 HeWhenJay
+
+This DSH adapter is distributed under CC BY-NC-SA 4.0. It is an adaptation
+layer written for the jlcodes99/cockpit-tools API-service integration and does
+not grant rights beyond the upstream project's applicable license and terms.
+See the repository root LICENSE/README for upstream notices.

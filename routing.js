@@ -1,0 +1,119 @@
+const DEFAULT_PROVIDER = 'cockpit-relay';
+const DEFAULT_CLIENT_KEY_ENV = 'DSH_COCKPIT_CLIENT_KEY';
+const TRANSIENT_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+
+function asString(value, fallback = '') {
+  return typeof value === 'string' ? value.trim() : fallback;
+}
+
+function asPositiveInt(value, fallback) {
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+export function normalizeConfig(raw = {}) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+  const listen = input.listen && typeof input.listen === 'object' ? input.listen : {};
+  const routes = Array.isArray(input.routes) ? input.routes : [];
+  const normalizedRoutes = routes.map((route, index) => {
+    const value = route && typeof route === 'object' ? route : {};
+    const models = Array.isArray(value.models) ? value.models.map((model) => asString(model)).filter(Boolean) : [];
+    const aliases = value.modelAliases && typeof value.modelAliases === 'object' ? { ...value.modelAliases } : {};
+    return {
+      id: asString(value.id, `route-${index + 1}`),
+      displayName: asString(value.displayName, asString(value.id, `Route ${index + 1}`)),
+      baseURL: asString(value.baseURL).replace(/\/+$/, ''),
+      api: value.api === 'openai-responses' ? 'openai-responses' : 'openai-completions',
+      apiKeyEnv: asString(value.apiKeyEnv),
+      apiKey: asString(value.apiKey),
+      priority: Number.isFinite(value.priority) ? Number(value.priority) : 0,
+      backup: value.backup === true,
+      models: [...new Set(models)],
+      modelAliases: aliases,
+      headers: value.headers && typeof value.headers === 'object' ? { ...value.headers } : {}
+    };
+  }).filter((route) => route.id && route.baseURL);
+  return {
+    provider: asString(input.provider, DEFAULT_PROVIDER),
+    maxAttempts: asPositiveInt(input.maxAttempts, 6),
+    cooldownMs: asPositiveInt(input.cooldownMs, 30000),
+    sessionAffinity: input.sessionAffinity !== false,
+    listen: {
+      enabled: listen.enabled !== false,
+      host: listen.host === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1',
+      port: Number.isInteger(listen.port) && listen.port >= 0 && listen.port <= 65535 ? listen.port : 19529,
+      apiKeyEnv: asString(listen.apiKeyEnv, DEFAULT_CLIENT_KEY_ENV)
+    },
+    routes: normalizedRoutes
+  };
+}
+
+function modelMatches(route, model) {
+  if (route.models.length === 0) return true;
+  return route.models.includes(model) || Object.prototype.hasOwnProperty.call(route.modelAliases, model);
+}
+
+export class ChannelRouter {
+  constructor(config, transport) {
+    this.config = config;
+    this.transport = transport;
+    this.cooldowns = new Map();
+    this.affinity = new Map();
+  }
+
+  candidates(model, sessionId) {
+    const available = this.config.routes.filter((route) => modelMatches(route, model));
+    const normal = available.filter((route) => !route.backup).sort((a, b) => b.priority - a.priority);
+    const backup = available.filter((route) => route.backup).sort((a, b) => b.priority - a.priority);
+    const now = Date.now();
+    const healthy = (route) => (this.cooldowns.get(route.id) ?? 0) <= now;
+    const active = [...normal, ...backup].filter(healthy);
+    const cooled = [...normal, ...backup].filter((route) => !healthy(route));
+    const ordered = [...active, ...cooled];
+    if (this.config.sessionAffinity && sessionId) {
+      const bound = ordered.find((route) => route.id === this.affinity.get(sessionId));
+      if (bound) return [bound, ...ordered.filter((route) => route.id !== bound.id)];
+    }
+    return ordered;
+  }
+
+  markFailure(route, error) {
+    if (TRANSIENT_STATUSES.has(Number(error?.status)) || error?.code === 'ECONNRESET') {
+      this.cooldowns.set(route.id, Date.now() + this.config.cooldownMs);
+    }
+  }
+
+  markSuccess(route, sessionId) {
+    this.cooldowns.delete(route.id);
+    if (this.config.sessionAffinity && sessionId) this.affinity.set(sessionId, route.id);
+  }
+
+  async execute(model, request, sessionId, operation = this.transport) {
+    const candidates = this.candidates(model, sessionId).slice(0, this.config.maxAttempts);
+    if (candidates.length === 0) {
+      const error = new Error(`no configured channel can serve model "${model}"`);
+      error.code = 'NO_ROUTE';
+      throw error;
+    }
+    let lastError;
+    for (const route of candidates) {
+      try {
+        const result = await operation(route, model, request);
+        if (result instanceof Response && !result.ok) {
+          const error = new Error(`${route.displayName} returned HTTP ${result.status}`);
+          error.status = result.status;
+          error.routeId = route.id;
+          throw error;
+        }
+        this.markSuccess(route, sessionId);
+        return { result, route };
+      } catch (error) {
+        lastError = error;
+        this.markFailure(route, error);
+      }
+    }
+    const error = new Error(`all configured channels failed for model "${model}"`);
+    error.code = 'UPSTREAM_UNAVAILABLE';
+    error.cause = lastError;
+    throw error;
+  }
+}
