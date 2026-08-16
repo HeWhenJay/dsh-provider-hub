@@ -10,7 +10,7 @@
     "./config.example.json": "./config.example.json",
     "./routing": "./routing.js"
   },
-  "files": ["index.js", "cordis.patch.yml", "config.example.json", "README.md", "LICENSE"],
+  "files": ["index.js", "routing.js", "cordis.patch.yml", "config.example.json", "README.md", "LICENSE"],
   "license": "CC-BY-NC-SA-4.0",
   "repository": {
     "type": "git",
@@ -19,8 +19,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6"
   },
   "engines": { "node": ">=20" },
   "scripts": {

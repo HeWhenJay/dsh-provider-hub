@@ -1,71 +1,100 @@
 # DSH Cockpit Relay
 
-将 Cockpit Tools API Service 的核心思路适配为一个 DSH Host 插件：本机保存多条低价中转渠道，按优先级调用，健康渠道失败时自动切换；正常价格渠道可作为保底。API Key 只在本机环境变量中读取，配置文件和 GitHub 仓库不包含密钥。
+这是一个 DSH Host 插件，将 Cockpit Tools API Service 的“多渠道、优先/保底、健康故障转移、本地/LAN 共享”思路提取为轻量网关。
+
+它不把 API Key 写进仓库、日志或接口响应；渠道只保存环境变量名。默认仅监听 `127.0.0.1`。切换到 `0.0.0.0` 时必须配置客户端访问密钥，否则插件拒绝启动。
 
 ## 安装
 
-在 DSH profile 中安装本目录（或 GitHub package）并将 bundle patch 加入 profile：
-
 ```powershell
-dsh plugin --profile web add C:\path\to\dsh-plugin
+dsh plugin --profile web add https://github.com/HeWhenJay/dsh-cockpit-relay.git
 ```
 
-把 `dsh-plugin/cordis.patch.yml` 的内容加入 profile 的 `cordis.patch.yml`，或复制该文件作为 bundle patch。插件也可以仅作为 LLM adapter 使用；有 Web profile 时会额外提供本地 HTTP API。
-
-## 配置账号/渠道
-
-复制 `config.example.json` 为 `cockpit-relay.json`。每个 `routes` 条目配置：
-
-- `id` / `displayName`：渠道标识和展示名。
-- `baseURL`：OpenAI-compatible 通常填到 `/v1`。原生 Anthropic endpoint 请在 DSH 自带 `llm-pi-ai` 中配置。
-- `api`：`openai-completions` 或 `openai-responses`。原生 Anthropic Messages 请使用 DSH 自带的 `llm-pi-ai` 配置；大多数中转站仍提供 OpenAI 兼容入口。
-- `apiKeyEnv`：环境变量名，不是实际密钥。
-- `models`：该渠道实际允许的模型 ID；相同模型可配置在多个渠道形成故障转移池。
-- `priority`：数字越大越优先。
-- `backup`：`true` 只在所有普通渠道不可用时使用，适合正常价格官方账号。
-- `modelAliases`：客户端模型名到上游模型名的映射。
-
-例如 PowerShell：
+把 `cordis.patch.yml` 加入 profile patch/bundle。配置文件路径默认是启动目录下的 `cockpit-relay.json`，也可指定：
 
 ```powershell
-$env:CHEAP_OPENAI_A_KEY = '只在当前进程可见的密钥'
-$env:CHEAP_OPENAI_B_KEY = '另一个渠道密钥'
-$env:OPENAI_API_KEY = '保底密钥'
-$env:DSH_COCKPIT_CLIENT_KEY = '给局域网客户端的访问密钥'
 $env:DSH_COCKPIT_CONFIG = 'C:\Users\me\.dsh\cockpit-relay.json'
 ```
 
-建议把密钥写入 DSH 的本机凭据/启动环境，不要写进 JSON、shell 历史、issue 或截图。
+## 配置多个渠道
 
-## 本地与局域网服务
+复制 `config.example.json` 为 `cockpit-relay.json`。每个 route 配置：
 
-默认只监听 `127.0.0.1:19529`。需要局域网共享时，将配置改为：
+- `id` / `displayName`：渠道标识和显示名。
+- `baseURL`：通常填到 `/v1`。
+- `api`：`openai-completions` 或 `openai-responses`。
+- `apiKeyEnv`：保存真实 Key 的环境变量名；不要写真实 Key。
+- `models`：渠道能服务的客户端模型 ID。留空表示接受任意模型名。
+- `modelAliases`：客户端模型名到该渠道真实模型名的映射。
+- `priority`：越大越优先。
+- `backup: true`：只在所有普通渠道不可用时使用，适合官方或正常价格保底。
 
-```json
-"listen": {
-  "enabled": true,
-  "host": "0.0.0.0",
-  "port": 19529,
-  "apiKeyEnv": "DSH_COCKPIT_CLIENT_KEY"
-}
+```powershell
+$env:CHEAP_OPENAI_A_KEY = '渠道 A 密钥'
+$env:CHEAP_OPENAI_B_KEY = '渠道 B 密钥'
+$env:OPENAI_API_KEY = '官方保底密钥'
 ```
 
-然后使用 `http://<局域网IP>:19529/v1`，客户端访问密钥放在 `Authorization: Bearer <DSH_COCKPIT_CLIENT_KEY>`。局域网模式只适合可信网络；插件没有替代 TLS、ACL、VPN 或防火墙，勿直接暴露到公网。
+同一个模型出现在多条 route 中，就形成故障转移池。429、常见 5xx 和网络连接故障会让渠道进入短暂冷却；请求会继续尝试下一条健康渠道。会话亲和默认开启，但不会把请求重新绑回冷却渠道。
 
-## 模型支持
+## 在 DSH 中使用
 
-插件不把模型写死为 GPT。只要渠道提供下列协议之一即可：
+本插件负责 HTTP 路由，DSH 的模型消息、工具调用、Reasoning 和协议适配交给内置 `llm-pi-ai`。在 `$DSH_HOME/settings.yaml` 添加：
 
-- OpenAI Chat Completions：GPT、DeepSeek、Qwen、Kimi、Grok、Gemini OpenAI 兼容入口，以及各种中转模型。
-- OpenAI Responses：支持 Responses 的 GPT/Codex 或兼容网关。
-- Anthropic Messages：Claude 及兼容 Anthropic 协议的渠道，可通过 DSH 自带 `llm-pi-ai` 适配层接入。
+```yaml
+llm-pi-ai:
+  providers:
+    cockpit-relay:
+      displayName: Cockpit Relay
+      api: openai-completions
+      baseURL: http://127.0.0.1:19529/v1
+      apiKeyEnv: DSH_COCKPIT_CLIENT_KEY
+      models:
+        - id: gpt-4o-mini
+          name: GPT-4o mini
+          contextWindow: 128000
+          maxTokens: 16384
+        - id: deepseek-chat
+          name: DeepSeek Chat
+          contextWindow: 128000
+          maxTokens: 8192
+        - id: claude-3-7-sonnet
+          name: Claude 3.7 Sonnet via Relay
+          contextWindow: 200000
+          maxTokens: 8192
+```
 
-同一个模型名只要出现在多个渠道的 `models` 中，就会自动组成一个故障转移池。模型目录是显式配置的，避免把上游私有模型错误宣传成一定可用。
+本机模式可以不设置客户端 Key；若 `llm-pi-ai` 要发送 Authorization，则让 `DSH_COCKPIT_CLIENT_KEY` 与网关配置一致。局域网模式必须设置：
 
-## 与原 Cockpit API Service 的关系
+```powershell
+$env:DSH_COCKPIT_CLIENT_KEY = '一条单独生成的局域网访问密钥'
+```
 
-原项目还包含 Rust/Tauri 管理、OAuth、Codex Agent Identity、配额同步、CLIProxyAPI Go sidecar、图片和 Gemini/Ollama 专用协议。完整边界和源码映射见根目录 [`docs/CODEX_API_SERVICE_HANDOFF.md`](../docs/CODEX_API_SERVICE_HANDOFF.md) 与 [`docs/DSH_PLUGIN_SCOPE.md`](../docs/DSH_PLUGIN_SCOPE.md)。本插件优先提供适合 DSH 的多渠道 LLM 路由；官方 OAuth 账号池仍建议使用上游桌面端生成的 sidecar。
+客户端 Base URL：
 
-## 许可与责任
+- 本机：`http://127.0.0.1:19529/v1`
+- 局域网：`http://<本机局域网IP>:19529/v1`
 
-上游项目默认为 CC BY-NC-SA 4.0，并有自己的贡献者和免责声明；本适配层保留署名并遵循非商业、相同方式共享要求。使用中转站、账号和模型时请遵守对应服务条款、当地法律及网络安全规则。
+支持 `/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/health` 和 CORS 预检。
+
+## 模型范围
+
+插件不限制 GPT。只要上游提供 OpenAI-compatible Chat Completions 或 Responses，就能配置：
+
+- OpenAI / Codex / GPT
+- Claude 的 OpenAI-compatible 中转入口
+- Gemini 的 OpenAI-compatible 入口
+- DeepSeek、Qwen、Kimi、Grok、GLM、MiniMax、Mistral、Llama 等
+
+原生 Anthropic Messages 不由该轻量网关转换；DSH 自带 `llm-pi-ai` 已支持 `anthropic-messages`，可单独直连原生 Claude 渠道。原 Cockpit sidecar 还支持 Anthropic、Gemini、Ollama、图片、Codex OAuth/Agent Identity 等更完整协议，源码边界见 `CODEX_API_SERVICE_HANDOFF.md` 和 `DSH_PLUGIN_SCOPE.md`。
+
+## 安全说明
+
+- API Key 只从环境变量读取，不提交到 GitHub。
+- LAN 模式必须启用客户端 Key，但仍建议只在可信局域网/VPN中使用。
+- 此插件不提供 TLS、用户级 ACL 或公网防护；不要把端口直接暴露到公网。
+- 使用中转站或多个账号时，请遵守对应平台服务条款、账号规则和当地法律。
+
+## 许可
+
+上游 Cockpit Tools 默认使用 CC BY-NC-SA 4.0。本适配层保留署名并以相同许可发布，仅用于非商业学习、研究和个人使用。

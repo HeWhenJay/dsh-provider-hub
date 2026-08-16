@@ -1,4 +1,6 @@
 # Add this bundle to a DSH profile after dsh-base.
+# The relay owns the local/LAN HTTP gateway. DSH's built-in llm-pi-ai adapter
+# should point at http://127.0.0.1:<port>/v1 as an OpenAI-compatible provider.
 - insert:
     - id: cockpit-relay
       name: '@hewhenjay/dsh-cockpit-relay'

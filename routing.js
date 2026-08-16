@@ -24,7 +24,6 @@ export function normalizeConfig(raw = {}) {
       baseURL: asString(value.baseURL).replace(/\/+$/, ''),
       api: value.api === 'openai-responses' ? 'openai-responses' : 'openai-completions',
       apiKeyEnv: asString(value.apiKeyEnv),
-      apiKey: asString(value.apiKey),
       priority: Number.isFinite(value.priority) ? Number(value.priority) : 0,
       backup: value.backup === true,
       models: [...new Set(models)],
@@ -70,7 +69,7 @@ export class ChannelRouter {
     const cooled = [...normal, ...backup].filter((route) => !healthy(route));
     const ordered = [...active, ...cooled];
     if (this.config.sessionAffinity && sessionId) {
-      const bound = ordered.find((route) => route.id === this.affinity.get(sessionId));
+      const bound = active.find((route) => route.id === this.affinity.get(sessionId));
       if (bound) return [bound, ...ordered.filter((route) => route.id !== bound.id)];
     }
     return ordered;

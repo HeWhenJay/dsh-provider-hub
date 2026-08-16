@@ -43,3 +43,23 @@ test('model aliases are resolved per channel', () => {
   const config = normalizeConfig({ routes: [{ id: 'x', baseURL: 'https://x.invalid/v1', api: 'openai-completions', models: ['public-model'], modelAliases: { 'public-model': 'vendor-model' } }] });
   assert.equal(config.routes[0].modelAliases['public-model'], 'vendor-model');
 });
+
+test('an affinity binding never revives a cooled route', async () => {
+  const calls = [];
+  const router = new ChannelRouter(normalizeConfig({
+    cooldownMs: 60000,
+    sessionAffinity: true,
+    routes: [
+      { id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'], priority: 100 },
+      { id: 'b', baseURL: 'https://b.invalid/v1', models: ['gpt-test'], priority: 90 }
+    ]
+  }), async (channel) => {
+    calls.push(channel.id);
+    if (channel.id === 'a' && calls.length === 2) throw Object.assign(new Error('down'), { status: 503 });
+    return { ok: true };
+  });
+  await router.execute('gpt-test', {}, 'session-1');
+  await router.execute('gpt-test', {}, 'session-1');
+  await router.execute('gpt-test', {}, 'session-1');
+  assert.deepEqual(calls, ['a', 'a', 'b', 'b']);
+});
