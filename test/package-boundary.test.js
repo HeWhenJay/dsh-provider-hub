@@ -37,6 +37,8 @@ test('web client contains only the built-in account service contract', () => {
   assert.match(source, /generatedCredentialRef/);
   assert.match(source, /setRouteId/);
   assert.match(source, /DSH 供应商已同步/);
+  assert.match(source, /补全模型规格/);
+  assert.match(source, /\/models\/research/);
   assert.doesNotMatch(source, /IconSettingsOutline/);
 });
 

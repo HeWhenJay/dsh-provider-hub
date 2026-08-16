@@ -16,6 +16,27 @@ export function normalizeConfig(raw = {}) {
   const accountService = input.accountService && typeof input.accountService === 'object' ? input.accountService : {};
   const managedProvider = input.managedProvider && typeof input.managedProvider === 'object' ? input.managedProvider : {};
   const managedProviderLastProfile = managedProvider.lastProfile && typeof managedProvider.lastProfile === 'object' ? managedProvider.lastProfile : undefined;
+  const rawSpecifications = input.modelSpecifications && typeof input.modelSpecifications === 'object' ? input.modelSpecifications : {};
+  const modelSpecifications = {};
+  for (const [rawId, rawSpecification] of Object.entries(rawSpecifications)) {
+    const id = asString(rawId);
+    const specification = rawSpecification && typeof rawSpecification === 'object' ? rawSpecification : {};
+    if (!id) continue;
+    const contextWindow = Number(specification.contextWindow);
+    const maxTokens = Number(specification.maxTokens);
+    const reasoningEfforts = specification.reasoningEfforts === false || specification.reasoningEfforts && typeof specification.reasoningEfforts === 'object' ? structuredClone(specification.reasoningEfforts) : undefined;
+    const compat = specification.compat && typeof specification.compat === 'object' ? { ...specification.compat } : undefined;
+    modelSpecifications[id] = {
+      id,
+      ...(asString(specification.name) ? { name: asString(specification.name) } : {}),
+      ...(Number.isInteger(contextWindow) && contextWindow > 0 ? { contextWindow } : {}),
+      ...(Number.isInteger(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
+      ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
+      ...(compat ? { compat } : {}),
+      sources: Array.isArray(specification.sources) ? [...new Set(specification.sources.map((source) => asString(source)).filter((source) => /^https:\/\//i.test(source)).slice(0, 6))] : [],
+      ...(asString(specification.researchedAt) ? { researchedAt: asString(specification.researchedAt) } : {})
+    };
+  }
   const routes = Array.isArray(input.routes) ? input.routes : [];
   const normalizedRoutes = routes.map((route, index) => {
     const value = route && typeof route === 'object' ? route : {};
@@ -66,6 +87,7 @@ export function normalizeConfig(raw = {}) {
       owned: managedProvider.owned === true,
       ...(managedProviderLastProfile ? { lastProfile: { ...managedProviderLastProfile } } : {})
     },
+    modelSpecifications,
     routes: normalizedRoutes
   };
 }

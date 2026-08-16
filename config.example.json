@@ -20,6 +20,7 @@
     "id": "provider-hub",
     "displayName": "Provider Hub"
   },
+  "modelSpecifications": {},
   "routes": [
     {
       "id": "openai-official",

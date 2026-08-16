@@ -30,16 +30,16 @@
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.4.1
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.5.0
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.4.1.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.5.0.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.4.1.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.5.0.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.4.1 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.5.0 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏底部的 **Provider Hub** 或 **Settings → Provider Hub** 进入。
 
@@ -84,9 +84,23 @@ OAuth 使用官方固定的 localhost 回调端口：
 
 Provider Hub 只在 `127.0.0.1` 上临时监听对应端口并校验 OAuth state。若端口已被占用，登录会明确失败；插件不会关闭占用者。释放端口后重新发起登录即可。
 
+### 一键补全官方模型规格
+
+渠道或官方账号已经提供模型列表后，可在 **供应商** 标签点击 **补全模型规格**。Provider Hub 会在后台逐个处理支持的模型：
+
+1. 通过 DSH 的联网检索服务查找模型厂商官方文档；
+2. 把官方搜索结果交给当前 DSH 默认模型生成严格 JSON；
+3. 只接受与模型 ID 对应厂商的官方域名、正整数限制和受支持的思考强度枚举；`thinkingFormat` 还必须与已识别厂商匹配，否则省略该兼容字段；无法可靠识别厂商的自定义别名会跳过；
+4. 将验证通过的 `contextWindow`、`maxTokens`、`reasoningEfforts`、兼容配置和来源 URL 写入 `provider-hub.json`；
+5. 热同步到自动管理的 `llm-pi-ai.providers.provider-hub`。
+
+按钮点击后任务会静默在 Host 后台运行，页面显示当前模型和进度，可以关闭 Provider Hub 窗口后继续使用 DSH。再次打开页面可查看结果和官方来源。单次最多处理 100 个模型；超长模型 ID、无法识别厂商、没有官方证据、证据不足、模型输出不符合结构或数值不合理时，该模型会被跳过或标记失败，原配置保持不变；插件不会用模型记忆猜测规格。渠道删除模型时会清理对应的孤立规格，研究期间被删除的模型不会写回配置。
+
+这项功能会消耗 DSH 联网检索与当前默认模型的调用额度，因此不会在保存渠道时未经用户点击自动触发。执行补全和配置热同步本身不需要重启 Web。
+
 ### 确认模型已自动接入 DSH
 
-保存渠道或完成官方账号登录后，页面顶部会显示 `DSH 供应商已同步（N 个模型）`。此时打开 DSH 的模型选择器即可看到 `Provider Hub` 提供的模型，无需再手工创建模型供应商。
+保存渠道、完成官方账号登录或补全模型规格后，页面顶部会显示 `DSH 供应商已同步（N 个模型）`。此时打开 DSH 的模型选择器即可看到 `Provider Hub` 提供的模型，无需再手工创建模型供应商。
 
 如果仍显示“等待可用模型”，请先确认渠道的模型列表不为空，或在 **官方账号** 标签点击 **刷新账号**。插件不会自动切换当前会话或默认模型，用户可在模型选择器中自行选择。
 
@@ -222,6 +236,8 @@ GET    /api/provider-hub/logs
 DELETE /api/provider-hub/logs
 PUT    /api/provider-hub/service
 POST   /api/provider-hub/models/discover
+GET    /api/provider-hub/models/research
+POST   /api/provider-hub/models/research
 POST   /api/provider-hub/routes
 DELETE /api/provider-hub/routes/:id
 POST   /api/provider-hub/routes/:id/test
@@ -260,6 +276,9 @@ v0.3 更名为 DSH Provider Hub，并从“桥接外部 Cockpit”迁移为独�
 - **OAuth 无法开始**：固定 localhost 回调端口可能已占用。插件不会抢占；释放相应端口后重试。
 - **OAuth 完成后没有模型**：点击 **刷新账号**，检查账号是否停用或暂不可用；也可保留 API Key 渠道作为普通或保底路径。
 - **DSH 中没有自动出现 Provider Hub**：确认 relay 正在运行且至少有一个可用模型；零模型时插件会等待，不创建无效供应商。
+- **“补全模型规格”不可用**：确认 DSH 已配置可用的默认模型和联网检索服务，并且 Provider Hub 至少支持一个模型。
+- **部分模型被跳过**：官方搜索结果没有同时证明上下文窗口和最大输出，或返回的思考强度缺少准确 API wire 值。为避免错误配置，插件不会猜测。
+- **补全后是否需要重启**：不需要。规格写入后由 DSH settings 热更新；只有安装或升级 Provider Hub 插件本身时，才需要用户在方便时自行重启 `dsh web`。
 - **显示同名供应商冲突**：DSH 已存在非插件创建的 `provider-hub` 条目。插件不会覆盖它；请先在 Models 中改名或删除该条目再刷新 Provider Hub。
 - **DSH 无法访问 relay**：使用实际 Base URL；检查 relay 开关与客户端密钥。LAN 模式无密钥时服务会拒绝启动。
 
@@ -270,7 +289,7 @@ npm test
 npm pack --dry-run
 ```
 
-测试覆盖路由优先级、保底与冷却、流式响应、端口避让、凭据不落盘、日志脱敏、模型发现、DSH 供应商同步与冲突保护、账号管理契约、OAuth state 限制、sidecar 资源映射与 checksum 解析、打包边界和浏览器模块注册。
+测试覆盖路由优先级、保底与冷却、流式响应、端口避让、凭据不落盘、日志脱敏、模型发现、官方来源模型规格补全与拒绝边界、DSH 供应商同步与冲突保护、账号管理契约、OAuth state 限制、sidecar 资源映射与 checksum 解析、打包边界和浏览器模块注册。
 
 ## 许可与第三方组件
 
