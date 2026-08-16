@@ -154,10 +154,16 @@ function sendJson(res, status, value, cors = false) {
   res.end(body);
 }
 
+function effectiveRouteModels(route) {
+  if (!Array.isArray(route.modelAllowlist) || route.modelAllowlist.length === 0) return route.models;
+  if (route.models.length === 0) return route.modelAllowlist;
+  return route.modelAllowlist.filter((id) => route.models.includes(id));
+}
+
 function modelsResponse(routes) {
   const models = new Map();
   for (const route of routes) {
-    for (const raw of route.models) {
+    for (const raw of effectiveRouteModels(route)) {
       const model = typeof raw === 'string' ? route.modelMetadata?.[raw] ?? { id: raw } : raw;
       const id = asString(model?.id);
       if (!id || models.has(id)) continue;
@@ -193,7 +199,7 @@ function managedModels(routes, supplemental = []) {
     });
   };
   for (const model of supplemental) append(model);
-  for (const route of routes) for (const model of route.models) append(route.modelMetadata?.[model] ?? model);
+  for (const route of routes) for (const model of effectiveRouteModels(route)) append(route.modelMetadata?.[model] ?? model);
   return [...models.values()];
 }
 
@@ -331,6 +337,8 @@ function routeInput(raw, existing) {
   const apiKeyEnv = suppliedApiKeyEnv || existing?.apiKeyEnv || generatedRouteCredentialRef(id);
   asCredentialRef(apiKeyEnv);
   const sourceModels = Array.isArray(value.models) ? value.models : existing?.models ?? [];
+  const sourceAllowlist = Array.isArray(value.modelAllowlist) ? value.modelAllowlist : existing?.modelAllowlist ?? [];
+  const modelAllowlist = [...new Set(sourceAllowlist.map((item) => asString(item)).filter(Boolean))];
   const modelMetadata = value.modelMetadata && typeof value.modelMetadata === 'object' ? { ...value.modelMetadata } : { ...(existing?.modelMetadata ?? {}) };
   const models = [];
   for (const rawModel of sourceModels) {
@@ -340,15 +348,18 @@ function routeInput(raw, existing) {
     if (rawModel && typeof rawModel === 'object') modelMetadata[id] = { ...rawModel, id };
   }
   for (const id of Object.keys(modelMetadata)) if (!models.includes(id)) delete modelMetadata[id];
+  const displayName = asString(value.displayName, existing?.displayName || id);
   return {
     id,
-    displayName: asString(value.displayName, existing?.displayName || id),
+    displayName,
+    keyName: asString(value.keyName, existing?.keyName || displayName),
     baseURL,
     api: value.api === 'openai-responses' ? 'openai-responses' : 'openai-completions',
     apiKeyEnv,
     priority: Number.isFinite(Number(value.priority)) ? Number(value.priority) : existing?.priority ?? 0,
     backup: value.backup === true,
     models,
+    modelAllowlist,
     modelMetadata,
     modelAliases: value.modelAliases && typeof value.modelAliases === 'object' ? { ...value.modelAliases } : existing?.modelAliases ?? {},
     headers: value.headers && typeof value.headers === 'object' ? { ...value.headers } : existing?.headers ?? {}
@@ -391,12 +402,14 @@ class RelayRuntime {
     return {
       id: 'provider-hub-accounts',
       displayName: 'Provider Hub 官方账号',
+      keyName: 'Provider Hub 官方账号',
       baseURL: `${this.sidecar.baseURL}/v1`,
       api: 'openai-completions',
       apiKeyEnv: SIDECAR_CLIENT_KEY_ENV,
       priority: this.config.accountService.priority,
       backup: false,
       models: this.sidecar.models.map((model) => model.id),
+      modelAllowlist: [],
       modelMetadata: Object.fromEntries(this.sidecar.models.map((model) => [model.id, model])),
       modelAliases: {},
       headers: {},
@@ -443,7 +456,7 @@ class RelayRuntime {
   }
 
   modelUsesCompletions(id) {
-    return this.runtimeRoutes().some((route) => route.models.includes(id) && route.api === 'openai-completions');
+    return this.runtimeRoutes().some((route) => effectiveRouteModels(route).includes(id) && route.api === 'openai-completions');
   }
 
   cleanOrphanedSpecifications({ persist = true } = {}) {
@@ -659,7 +672,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.5.0', ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.0', ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',
@@ -814,6 +827,7 @@ class RelayRuntime {
       time: new Date().toISOString(),
       routeId: entry.route.id,
       routeName: entry.route.displayName,
+      keyName: entry.route.keyName || entry.route.displayName,
       model: entry.model,
       ok: entry.ok,
       status: entry.status,
@@ -1001,8 +1015,10 @@ class RelayRuntime {
   async testRoute(id, model) {
     const route = this.config.routes.find((item) => item.id === id);
     if (!route) throw new Error('route not found');
-    const selectedModel = asString(model, route.models[0]);
+    const allowedModels = effectiveRouteModels(route);
+    const selectedModel = asString(model, allowedModels[0]);
     if (!selectedModel) throw new Error('select a model before testing');
+    if (!allowedModels.includes(selectedModel)) throw new Error(`model "${selectedModel}" is not allowed for this API key`);
     const startedAt = Date.now();
     const response = await this.transport(route, selectedModel, { body: { model: selectedModel, messages: [{ role: 'user', content: 'Reply with OK.' }], max_tokens: 8, stream: false }, endpoint: 'chat' });
     const text = await response.text();

@@ -25,24 +25,28 @@
     {
       "id": "openai-official",
       "displayName": "OpenAI Official API",
+      "keyName": "OpenAI Production Key",
       "baseURL": "https://api.openai.com/v1",
       "api": "openai-responses",
       "apiKeyEnv": "OPENAI_API_KEY",
       "priority": 500,
       "backup": false,
       "models": ["gpt-5.4"],
+      "modelAllowlist": ["gpt-5.4"],
       "modelAliases": {},
       "headers": {}
     },
     {
       "id": "fallback-relay",
       "displayName": "Fallback OpenAI-compatible Relay",
+      "keyName": "Relay Backup Key",
       "baseURL": "https://relay.example/v1",
       "api": "openai-completions",
       "apiKeyEnv": "DSH_PROVIDER_HUB_FALLBACK_RELAY_KEY",
       "priority": 10,
       "backup": true,
       "models": ["gpt-5.4"],
+      "modelAllowlist": [],
       "modelAliases": {
         "gpt-5.4": "vendor-model-name"
       },

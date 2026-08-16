@@ -33,12 +33,16 @@ test('web client contains only the built-in account service contract', () => {
   assert.match(source, /内置官方账号服务/);
   assert.doesNotMatch(source, /\/cockpit|CockpitBridge|CockpitEditor|Cockpit 账号池/);
   assert.match(source, /Lucide \"Network\"/);
-  assert.match(source, /icon: ProviderHubIcon/);
+  assert.match(source, /data-dsh-provider-hub-active/);
+  assert.match(source, /dshProviderHubEntry/);
+  assert.match(source, /createRoot/);
+  assert.doesNotMatch(source, /sidebar\.footer\.action|settings\.section/);
   assert.match(source, /generatedCredentialRef/);
   assert.match(source, /setRouteId/);
   assert.match(source, /DSH 供应商已同步/);
   assert.match(source, /补全模型规格/);
   assert.match(source, /\/models\/research/);
+  assert.match(source, /API Key 名称|modelAllowlistText/);
   assert.doesNotMatch(source, /IconSettingsOutline/);
 });
 
@@ -65,7 +69,7 @@ test('packed tarball includes every runtime module and imports cleanly', () => {
     assert.ok(files.includes('sidecar.js'));
     assert.ok(files.includes('index.js'));
     assert.ok(files.includes('web-client.js'));
-    for (const image of ['provider-hub-entry.png', 'provider-hub-dashboard.png', 'provider-hub-add-route.png', 'provider-hub-accounts.png']) {
+    for (const image of ['provider-hub-entry.png', 'provider-hub-dashboard.png', 'provider-hub-add-route.png', 'provider-hub-route-allowlist.png', 'provider-hub-accounts.png']) {
       assert.ok(files.includes(`docs/images/${image}`));
     }
     execFileSync('tar.exe', ['-xf', tarball, '-C', destination]);

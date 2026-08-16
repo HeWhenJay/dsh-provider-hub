@@ -49,15 +49,20 @@ export function normalizeConfig(raw = {}) {
       if (rawModel && typeof rawModel === 'object') modelMetadata[id] = { ...rawModel, id };
     }
     const aliases = value.modelAliases && typeof value.modelAliases === 'object' ? { ...value.modelAliases } : {};
+    const id = asString(value.id, `route-${index + 1}`);
+    const displayName = asString(value.displayName, id || `Route ${index + 1}`);
+    const modelAllowlist = Array.isArray(value.modelAllowlist) ? [...new Set(value.modelAllowlist.map((model) => asString(model)).filter(Boolean))] : [];
     return {
-      id: asString(value.id, `route-${index + 1}`),
-      displayName: asString(value.displayName, asString(value.id, `Route ${index + 1}`)),
+      id,
+      displayName,
+      keyName: asString(value.keyName, displayName),
       baseURL: asString(value.baseURL).replace(/\/+$/, ''),
       api: value.api === 'openai-responses' ? 'openai-responses' : 'openai-completions',
       apiKeyEnv: asString(value.apiKeyEnv, `DSH_PROVIDER_HUB_${asString(value.id, `ROUTE_${index + 1}`).toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY`),
       priority: Number.isFinite(value.priority) ? Number(value.priority) : 0,
       backup: value.backup === true,
       models,
+      modelAllowlist,
       modelMetadata,
       modelAliases: aliases,
       headers: value.headers && typeof value.headers === 'object' ? { ...value.headers } : {}
@@ -93,6 +98,7 @@ export function normalizeConfig(raw = {}) {
 }
 
 function modelMatches(route, model) {
+  if (route.modelAllowlist?.length > 0 && !route.modelAllowlist.includes(model)) return false;
   if (route.models.length === 0) return true;
   return route.models.includes(model) || Object.prototype.hasOwnProperty.call(route.modelAliases, model);
 }

@@ -12,15 +12,16 @@
 
 ## 能力概览
 
-- DSH Web 原生入口：左侧栏按钮与 Settings 页面。
+- DSH Web 独立入口：与任务看板、SSH、知识库同属左侧栏上方的应用入口，点击后进入专用中心页面。
 - 内置官方账号服务：OpenAI / Codex、Anthropic / Claude、Google / Gemini 官方 OAuth。
-- API Key 渠道：官方 API、中转站、本地网关或其他 OpenAI-compatible 服务。
+- API Key 渠道：官方 API、中转站、本地网关或其他 OpenAI-compatible 服务；同一 Base URL 可配置多个独立命名的 Key。
+- 每 Key 模型白名单：留空允许该 Key 的全部上游支持模型，填写后只允许精确列出的模型进入该 Key。
 - 模型发现：优先复用 DSH 自带的一键模型发现，失败时直接读取供应商 `/models`。
 - 聚合 OpenAI-compatible API：`/v1/models`、`/v1/chat/completions`、`/v1/responses`。
-- 自动接入 DSH Models：服务启动后按实际监听端口创建 `provider-hub` 供应商，并同步聚合模型目录。
+- 自动接入 DSH Models：服务启动后按实际监听端口创建 `provider-hub` 供应商，并同步每个 Key 白名单过滤后的聚合模型目录。
 - 路由控制：优先级、普通/保底渠道、瞬时故障冷却、最大尝试次数、会话粘性和模型别名。
 - 安全凭据：实际密钥写入 DSH credentials；JSON 配置仅保存凭据引用。
-- 脱敏日志：只保留渠道、模型、HTTP 状态和延迟，不记录提示词、密钥或完整上游 URL。
+- 脱敏日志：展示 Key 名称、模型、HTTP 状态和延迟，不记录提示词、密钥、凭据引用或完整上游 URL。
 - 非侵入端口避让：端口被占用时只选择后续空闲端口，绝不按端口结束其他进程。
 
 ## 安装
@@ -30,20 +31,20 @@
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.5.0
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.0
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.5.0.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.0.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.5.0.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.0.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.5.0 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.0 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
-安装后可从左侧栏底部的 **Provider Hub** 或 **Settings → Provider Hub** 进入。
+安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 
-![从 DSH 左侧栏打开 Provider Hub](docs/images/provider-hub-entry.png)
+![从 DSH 左侧栏打开 Provider Hub 独立页面](docs/images/provider-hub-entry.png)
 
 ## 新用户快速上手
 
@@ -53,12 +54,15 @@ npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.5.0 当前以 GitH
 
 1. 点击左侧栏的 **Provider Hub**，确认页面顶部显示“Provider Hub 运行中”。
 2. 保持在 **供应商** 标签，点击右上角的 **添加供应商**。
-3. 填写渠道 ID、显示名称和 Base URL。OpenAI-compatible 服务通常填写到 `/v1`。
+3. 填写渠道 ID、渠道显示名称、API Key 名称和 Base URL。API Key 名称用于区分同一 Base URL 下的多个 Key，也会显示在请求日志中；不会发送给上游。
 4. API Key 输入实际密钥；“凭据变量名”会随渠道 ID 自动生成。密钥只写入 DSH credentials，不会保存在 `provider-hub.json`。
-5. 选择 Chat Completions 或 Responses 协议，点击 **获取全部模型**。确认模型列表后设置优先级；需要最后兜底时勾选保底渠道。
-6. 点击 **保存渠道**，回到供应商卡片后点击 **测试**。
+5. 选择 Chat Completions 或 Responses 协议，点击 **获取全部模型**。确认上游支持模型后，可填写当前 Key 的 **白名单模型路由**；支持逗号或换行分隔，留空表示允许该 Key 的全部上游支持模型。
+6. 设置当前 Key 的优先级；需要最后兜底时勾选保底渠道。若同一 Base URL 还要使用另一个 Key，请创建一个不同渠道 ID 的新渠道，并为它设置独立的 Key 名称、凭据、优先级和白名单。
+7. 点击 **保存渠道**，回到供应商卡片后点击 **测试**。
 
-![添加 OpenAI-compatible API 渠道](docs/images/provider-hub-add-route.png)
+![为渠道设置 API Key 名称和 Base URL](docs/images/provider-hub-add-route.png)
+
+![为当前 API Key 设置模型白名单](docs/images/provider-hub-route-allowlist.png)
 
 图中 API Key 保持为空，仅演示安全的字段填写方式。新渠道的默认凭据引用是 `DSH_PROVIDER_HUB_<CHANNEL_ID>_KEY`：渠道 ID 会转成大写，所有非字母数字字符替换为下划线，例如 `openai-official` → `DSH_PROVIDER_HUB_OPENAI_OFFICIAL_KEY`。
 
@@ -110,7 +114,7 @@ Provider Hub 默认在 `127.0.0.1:19529` 提供统一接口。服务成功启动
 
 - Base URL 使用页面显示的实际地址，包括端口冲突后的自动避让端口；
 - API 固定为 OpenAI Chat Completions；
-- 模型从 Provider Hub 的聚合 `/v1/models` 目录读取、去重，并尽可能保留名称、上下文窗口和最大输出长度；
+- 模型从 Provider Hub 的聚合 `/v1/models` 目录读取、去重；每个 Key 非空白名单之外的模型不会进入聚合目录，并尽可能保留名称、上下文窗口和最大输出长度；
 - 只有已配置 Provider Hub 客户端访问密钥时才写入对应 `apiKeyEnv`；
 - 渠道、官方账号或 sidecar 模型变化后会自动重新同步。
 
@@ -126,12 +130,13 @@ http://127.0.0.1:19529/v1
 
 对每次请求，Provider Hub 按以下顺序选择渠道：
 
-1. 过滤不能服务该模型的渠道；空模型列表表示允许所有模型。
-2. 普通渠道按优先级从高到低排序。
-3. 保底渠道按优先级从高到低排在普通渠道之后。
-4. 遇到 `408`、`409`、`425`、`429`、`500`、`502`、`503`、`504` 或连接重置时，将渠道暂时冷却。
-5. 在 `maxAttempts` 范围内尝试后续渠道。
-6. 启用会话粘性时，同一 session 优先复用已成功的健康渠道；失效时自动重选。
+1. 先按当前 API Key 的 `modelAllowlist` 过滤：空白名单允许该 Key 的全部上游支持模型；非空白名单只接受精确列出的请求模型 ID，模型别名不能绕过白名单。
+2. 再验证请求模型是否存在于渠道的上游支持模型目录；上游目录为空时视为不额外限制。
+3. 普通渠道按优先级从高到低排序。
+4. 保底渠道按优先级从高到低排在普通渠道之后。
+5. 遇到 `408`、`409`、`425`、`429`、`500`、`502`、`503`、`504` 或连接重置时，将当前 Key 渠道暂时冷却。
+6. 在 `maxAttempts` 范围内尝试后续渠道；相同 Base URL 的另一个 Key 只要是独立渠道且匹配模型，也可成为后续候选。
+7. 启用会话粘性时，同一 session 优先复用已成功的健康渠道；失效时自动重选。
 
 内置官方账号渠道默认优先级为 `1000`，可在账号服务设置中修改。它与自定义 API 渠道使用相同排序规则。自定义渠道可标记为保底。
 
@@ -203,11 +208,36 @@ provider-hub/sidecar/
     "id": "provider-hub",
     "displayName": "Provider Hub"
   },
-  "routes": []
+  "routes": [
+    {
+      "id": "shared-prod",
+      "displayName": "Shared API",
+      "keyName": "Production Key",
+      "baseURL": "https://relay.example/v1",
+      "api": "openai-completions",
+      "apiKeyEnv": "DSH_PROVIDER_HUB_SHARED_PROD_KEY",
+      "priority": 100,
+      "backup": false,
+      "models": ["gpt-main", "gpt-fast"],
+      "modelAllowlist": ["gpt-main"]
+    },
+    {
+      "id": "shared-backup",
+      "displayName": "Shared API",
+      "keyName": "Backup Key",
+      "baseURL": "https://relay.example/v1",
+      "api": "openai-completions",
+      "apiKeyEnv": "DSH_PROVIDER_HUB_SHARED_BACKUP_KEY",
+      "priority": 10,
+      "backup": true,
+      "models": ["gpt-main", "gpt-fast"],
+      "modelAllowlist": []
+    }
+  ]
 }
 ```
 
-环境变量 `DSH_PROVIDER_HUB_CONFIG` 可指定其他配置路径。
+环境变量 `DSH_PROVIDER_HUB_CONFIG` 可指定其他配置路径。渠道 ID 必须唯一；Base URL 不要求唯一，因此同一地址可以配置多个使用不同凭据引用的 Key。`keyName` 是可进入日志的显示名称；`modelAllowlist: []` 表示允许该渠道 `models` 中的全部模型，非空时只发布和路由其中精确列出的模型。
 
 ### 端口与监听安全
 
@@ -289,8 +319,8 @@ npm test
 npm pack --dry-run
 ```
 
-测试覆盖路由优先级、保底与冷却、流式响应、端口避让、凭据不落盘、日志脱敏、模型发现、官方来源模型规格补全与拒绝边界、DSH 供应商同步与冲突保护、账号管理契约、OAuth state 限制、sidecar 资源映射与 checksum 解析、打包边界和浏览器模块注册。
+测试覆盖路由优先级、每 Key 模型白名单、同 URL 多 Key、别名绕过防护、保底与冷却、流式响应、端口避让、凭据不落盘、Key 名称日志与脱敏、模型发现、官方来源模型规格补全与拒绝边界、DSH 供应商同步与冲突保护、账号管理契约、OAuth state 限制、sidecar 资源映射与 checksum 解析、打包边界和浏览器模块注册。
 
 ## 许可与第三方组件
 
-Provider Hub 插件代码按仓库 `LICENSE`（CC BY-NC-SA 4.0）发布。设置导航中的 Network 图标来自 [Lucide](https://lucide.dev/icons/network)，按 ISC License 使用。内置账号服务二进制不打进 npm 包；首次使用时从 CLIProxyAPI 官方 Release 下载。CLIProxyAPI 由其作者按 MIT License 发布。使用官方账号、API Key、中转服务和多账号路由时，请遵守对应平台服务条款、账号政策和当地法律。
+Provider Hub 插件代码按仓库 `LICENSE`（CC BY-NC-SA 4.0）发布。左侧应用入口中的 Network 图标来自 [Lucide](https://lucide.dev/icons/network)，按 ISC License 使用。内置账号服务二进制不打进 npm 包；首次使用时从 CLIProxyAPI 官方 Release 下载。CLIProxyAPI 由其作者按 MIT License 发布。使用官方账号、API Key、中转服务和多账号路由时，请遵守对应平台服务条款、账号政策和当地法律。

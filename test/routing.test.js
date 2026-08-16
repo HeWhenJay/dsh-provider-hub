@@ -44,6 +44,18 @@ test('model aliases are resolved per channel', () => {
   assert.equal(config.routes[0].modelAliases['public-model'], 'vendor-model');
 });
 
+test('model aliases cannot bypass an API key allowlist', () => {
+  const router = new ChannelRouter(normalizeConfig({ routes: [{
+    id: 'x',
+    baseURL: 'https://x.invalid/v1',
+    models: ['allowed-model', 'blocked-model'],
+    modelAllowlist: ['allowed-model'],
+    modelAliases: { 'blocked-model': 'vendor-model' }
+  }] }));
+  assert.deepEqual(router.candidates('allowed-model').map((route) => route.id), ['x']);
+  assert.deepEqual(router.candidates('blocked-model'), []);
+});
+
 test('an affinity binding never revives a cooled route', async () => {
   const calls = [];
   const router = new ChannelRouter(normalizeConfig({

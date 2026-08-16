@@ -76,7 +76,7 @@ async function management(runtimeInstance, path, init, prefix = PREFIX) {
   });
 }
 
-test('models endpoint never exposes upstream secrets', async () => {
+test('models endpoint applies route allowlists without exposing upstream secrets', async () => {
   const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1', apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', displayName: 'A', baseURL: 'https://a.invalid/v1', apiKeyEnv: 'SECRET_ENV_NAME', models: ['gpt-test'] }] }, { SECRET_ENV_NAME: 'sk-secret' });
   try {
     await withServer((req, res) => fixture.instance.handleRelay(req, res), async (url) => {
@@ -87,6 +87,60 @@ test('models endpoint never exposes upstream secrets', async () => {
       assert.doesNotMatch(body, /sk-secret|authorization|apiKey/i);
     });
   } finally { await fixture.dispose(); }
+});
+
+test('blank model allowlist serves every discovered model while a populated allowlist filters per API key', async () => {
+  const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1' }, accountService: { enabled: false }, routes: [
+    { id: 'all', keyName: 'All Models Key', baseURL: 'https://same.invalid/v1', models: ['gpt-a', 'gpt-b'], modelAllowlist: [], priority: 10 },
+    { id: 'only-b', keyName: 'B Only Key', baseURL: 'https://same.invalid/v1', models: ['gpt-a', 'gpt-b'], modelAllowlist: ['gpt-b'], priority: 20 }
+  ] });
+  try {
+    assert.deepEqual(fixture.instance.router.candidates('gpt-a').map((route) => route.id), ['all']);
+    assert.deepEqual(fixture.instance.router.candidates('gpt-b').map((route) => route.id), ['only-b', 'all']);
+    assert.equal(fixture.instance.config.routes[0].baseURL, fixture.instance.config.routes[1].baseURL);
+  } finally { await fixture.dispose(); }
+});
+
+test('models endpoint and managed DSH provider expose only the union of effective per-key models', async () => {
+  const settingsService = settings();
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [
+    { id: 'key-a', baseURL: 'https://same.invalid/v1', models: ['gpt-a', 'gpt-b', 'gpt-hidden'], modelAllowlist: ['gpt-a'] },
+    { id: 'key-b', baseURL: 'https://same.invalid/v1', models: ['gpt-a', 'gpt-b', 'gpt-hidden'], modelAllowlist: ['gpt-b'] }
+  ] }, {}, settingsService);
+  try {
+    await fixture.instance.start();
+    const response = await fetch(`${fixture.instance.relayBaseURL()}/models`);
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).data.map((model) => model.id), ['gpt-a', 'gpt-b']);
+    assert.deepEqual(settingsService.snapshot().providers['provider-hub'].models.map((model) => model.id), ['gpt-a', 'gpt-b']);
+  } finally { await fixture.dispose(); }
+});
+
+test('route logs expose API key names but never credential references or values', async () => {
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', displayName: 'Shared URL', keyName: 'Production Key', baseURL: 'https://same.invalid/v1', apiKeyEnv: 'SECRET_REF', models: ['gpt-test'] }] }, { SECRET_REF: 'sk-private-value' });
+  try {
+    fixture.instance.recordAttempt({ route: fixture.instance.config.routes[0], model: 'gpt-test', ok: true, status: 200, latencyMs: 9 });
+    assert.equal(fixture.instance.logs[0].keyName, 'Production Key');
+    assert.equal(JSON.stringify(fixture.instance.logs).includes('SECRET_REF'), false);
+    assert.equal(JSON.stringify(fixture.instance.logs).includes('sk-private-value'), false);
+  } finally { await fixture.dispose(); }
+});
+
+test('route tests reject models outside the API key allowlist before contacting upstream', async () => {
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://same.invalid/v1', models: ['allowed', 'blocked'], modelAllowlist: ['allowed'] }] });
+  let contacted = false;
+  fixture.instance.transport = async () => { contacted = true; return new Response('{}'); };
+  try {
+    await assert.rejects(() => fixture.instance.testRoute('a', 'blocked'), /not allowed for this API key/);
+    assert.equal(contacted, false);
+  } finally { await fixture.dispose(); }
+});
+
+test('legacy routes migrate display names into key names without changing credential refs', () => {
+  const config = normalizeConfig({ accountService: { enabled: false }, routes: [{ id: 'legacy', displayName: 'Legacy Key', baseURL: 'https://same.invalid/v1', apiKeyEnv: 'LEGACY_SECRET', models: ['gpt-test'] }] });
+  assert.equal(config.routes[0].keyName, 'Legacy Key');
+  assert.deepEqual(config.routes[0].modelAllowlist, []);
+  assert.equal(config.routes[0].apiKeyEnv, 'LEGACY_SECRET');
 });
 
 test('chat endpoint fails over and preserves streaming bytes', async () => {
@@ -129,6 +183,21 @@ test('management API generates a credential ref when the client submits an empty
     const persisted = readFileSync(join(fixture.dir, 'provider-hub.json'), 'utf8');
     assert.doesNotMatch(persisted, /sk-private/);
     assert.match(persisted, /DSH_PROVIDER_HUB_CHEAP_A_KEY/);
+  } finally { await fixture.dispose(); }
+});
+
+test('management API persists API key names and model allowlists independently for the same URL', async () => {
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [] });
+  try {
+    const first = await management(fixture.instance, '/routes', { method: 'POST', body: JSON.stringify({ id: 'same-prod', displayName: 'Shared API', keyName: 'Production Key', baseURL: 'https://same.invalid/v1', apiKey: 'sk-prod', models: ['gpt-a', 'gpt-b'], modelAllowlist: ['gpt-a'] }) });
+    const second = await management(fixture.instance, '/routes', { method: 'POST', body: JSON.stringify({ id: 'same-backup', displayName: 'Shared API', keyName: 'Backup Key', baseURL: 'https://same.invalid/v1', apiKey: 'sk-backup', models: ['gpt-a', 'gpt-b'], modelAllowlist: ['gpt-b'] }) });
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.body.routes[0].baseURL, second.body.routes[1].baseURL);
+    assert.deepEqual(second.body.routes.map((route) => route.keyName), ['Production Key', 'Backup Key']);
+    assert.deepEqual(second.body.routes.map((route) => route.modelAllowlist), [['gpt-a'], ['gpt-b']]);
+    const persisted = readFileSync(join(fixture.dir, 'provider-hub.json'), 'utf8');
+    assert.doesNotMatch(persisted, /sk-prod|sk-backup/);
   } finally { await fixture.dispose(); }
 });
 
@@ -581,6 +650,19 @@ test('researched compat is omitted when a model is only served by Responses rout
     const model = settingsService.snapshot().providers['provider-hub'].models[0];
     assert.equal(model.compat, undefined);
     assert.deepEqual(model.reasoningEfforts, { low: 'low' });
+  } finally { await fixture.dispose(); }
+});
+
+test('a completions route excluded by its key allowlist does not add compat to a Responses model', async () => {
+  const settingsService = settings();
+  const specification = { id: 'gpt-test', contextWindow: 128000, maxTokens: 16384, compat: { thinkingFormat: 'openai', supportsReasoningEffort: true }, sources: ['https://platform.openai.com/docs/models/gpt-test'] };
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, modelSpecifications: { 'gpt-test': specification }, routes: [
+    { id: 'responses', baseURL: 'https://responses.invalid/v1', api: 'openai-responses', models: ['gpt-test'], modelAllowlist: ['gpt-test'] },
+    { id: 'completions', baseURL: 'https://completions.invalid/v1', api: 'openai-completions', models: ['gpt-test', 'other'], modelAllowlist: ['other'] }
+  ] }, {}, settingsService);
+  try {
+    await fixture.instance.start();
+    assert.equal(settingsService.snapshot().providers['provider-hub'].models.find((model) => model.id === 'gpt-test').compat, undefined);
   } finally { await fixture.dispose(); }
 });
 
