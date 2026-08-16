@@ -44,6 +44,9 @@ test('web client contains only the built-in account service contract', () => {
   assert.match(source, /模型规格/);
   assert.match(source, /ModelSpecifications/);
   assert.match(source, /container-name:providerHub/);
+  assert.match(source, /body\[data-ds-dark-theme\] \.ph-workspace/);
+  assert.doesNotMatch(source, /light-dark\(|color-scheme:light dark/);
+  assert.match(source, /ph-specStatus/);
   assert.match(source, /\/models\/research/);
   assert.match(source, /API Key 名称|modelAllowlistText/);
   assert.doesNotMatch(source, /IconSettingsOutline/);

@@ -56,16 +56,16 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.1
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.2
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.1.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.2.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.1.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.2.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.1 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.2 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 
