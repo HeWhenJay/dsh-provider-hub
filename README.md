@@ -20,11 +20,19 @@
 
 要求：DSH `0.1.0-rc.6` 或兼容版本、Node.js 20+，以及首次安装内置账号服务时可访问 GitHub Releases。
 
+从 GitHub tag 安装：
+
 ```bash
-dsh plugin --profile web add @hewhenjay/dsh-provider-hub
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.3.0
 ```
 
-也可以安装 release 中的 `.tgz`。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.3.0.tgz` 后安装：
+
+```bash
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.3.0.tgz
+```
+
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.3.0 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏底部的 **Provider Hub** 或 **Settings → Provider Hub** 进入。
 
