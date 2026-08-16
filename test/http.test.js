@@ -97,6 +97,16 @@ test('management API stores keys through credential service without serializing 
   } finally { await fixture.dispose(); }
 });
 
+test('deleting a route preserves a possibly shared credential', async () => {
+  const fixture = runtime({ listen: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', apiKeyEnv: 'SHARED_KEY' }] }, { SHARED_KEY: 'sk-shared' });
+  try {
+    const response = await management(fixture.instance, '/routes/a', { method: 'DELETE' });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.routes.length, 0);
+    assert.equal(fixture.ctx.credentials.store.get('SHARED_KEY'), 'sk-shared');
+  } finally { await fixture.dispose(); }
+});
+
 test('service is enabled by default and can be disabled through management API', async () => {
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1' }] });
   try {

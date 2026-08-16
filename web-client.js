@@ -129,7 +129,7 @@ window.__ModuleLoader__.load({
       const [editing, setEditing] = React.useState(null);
       const [testing, setTesting] = React.useState('');
       const remove = async (route) => {
-        if (!confirm(`删除渠道“${route.displayName}”？其本机凭据也会尝试删除。`)) return;
+        if (!confirm(`删除渠道“${route.displayName}”？为避免影响共享账号，已保存的 DSH 凭据会保留。`)) return;
         try { relay.setState(await api(`/routes/${encodeURIComponent(route.id)}`, { method: 'DELETE' })); }
         catch (error) { relay.setError(error.message); }
       };
