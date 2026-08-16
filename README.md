@@ -4,6 +4,12 @@
 
 安装 Provider Hub 不要求安装 Cockpit Desktop，也不会读取、停止或接管已有 Cockpit 服务。官方账号能力由插件自行管理的 loopback sidecar 提供；sidecar 使用上游 CLIProxyAPI 的固定版本，并在首次安装时校验官方 SHA-256。
 
+## 界面预览
+
+![Provider Hub 服务总览](docs/images/provider-hub-dashboard.png)
+
+页面顶部显示实际 Relay 地址、运行状态和 DSH 供应商同步状态；下方可在 **供应商**、**官方账号** 和 **日志** 之间切换。
+
 ## 能力概览
 
 - DSH Web 原生入口：左侧栏按钮与 Settings 页面。
@@ -24,28 +30,47 @@
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.4.0
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.4.1
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.4.0.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.4.1.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.4.0.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.4.1.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.4.0 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.4.1 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏底部的 **Provider Hub** 或 **Settings → Provider Hub** 进入。
 
-## 快速开始
+![从 DSH 左侧栏打开 Provider Hub](docs/images/provider-hub-entry.png)
 
-### 登录官方账号
+## 新用户快速上手
+
+安装并安全重启 `dsh web` 后，按下面两种方式任选一种接入模型。已有 Cockpit 或其他 DSH 供应商不会被关闭或替换。
+
+### 方式一：添加 API Key 或中转渠道
+
+1. 点击左侧栏的 **Provider Hub**，确认页面顶部显示“Provider Hub 运行中”。
+2. 保持在 **供应商** 标签，点击右上角的 **添加供应商**。
+3. 填写渠道 ID、显示名称和 Base URL。OpenAI-compatible 服务通常填写到 `/v1`。
+4. API Key 输入实际密钥；“凭据变量名”会随渠道 ID 自动生成。密钥只写入 DSH credentials，不会保存在 `provider-hub.json`。
+5. 选择 Chat Completions 或 Responses 协议，点击 **获取全部模型**。确认模型列表后设置优先级；需要最后兜底时勾选保底渠道。
+6. 点击 **保存渠道**，回到供应商卡片后点击 **测试**。
+
+![添加 OpenAI-compatible API 渠道](docs/images/provider-hub-add-route.png)
+
+图中 API Key 保持为空，仅演示安全的字段填写方式。新渠道的默认凭据引用是 `DSH_PROVIDER_HUB_<CHANNEL_ID>_KEY`：渠道 ID 会转成大写，所有非字母数字字符替换为下划线，例如 `openai-official` → `DSH_PROVIDER_HUB_OPENAI_OFFICIAL_KEY`。
+
+### 方式二：登录官方账号
 
 1. 打开 **Provider Hub → 官方账号**。
-2. 如 sidecar 尚未安装，点击 **安装并启动**。
-3. 选择 **OpenAI / Codex**、**Anthropic / Claude** 或 **Google / Gemini**。
-4. 在浏览器完成官方授权。
+2. 如账号服务尚未安装，点击 **安装并启动**；首次安装会下载固定版本并验证官方 SHA-256。
+3. 选择 **登录 OpenAI / Codex**、**登录 Anthropic / Claude** 或 **登录 Google / Gemini**。
+4. 在浏览器完成官方 OAuth 授权。
 5. 返回 DSH；页面会轮询授权状态并自动刷新账号与模型。
+
+![登录 Codex、Claude 或 Gemini 官方账号](docs/images/provider-hub-accounts.png)
 
 账号服务启动后，Provider Hub 会生成一个只存在于运行时的内部渠道。它使用 sidecar 返回的模型目录和账号服务优先级参与统一路由，不会把内部访问密钥返回浏览器，也不会把内部渠道写进 `routes` 配置。
 
@@ -59,19 +84,13 @@ OAuth 使用官方固定的 localhost 回调端口：
 
 Provider Hub 只在 `127.0.0.1` 上临时监听对应端口并校验 OAuth state。若端口已被占用，登录会明确失败；插件不会关闭占用者。释放端口后重新发起登录即可。
 
-### 添加 API Key 或中转渠道
+### 确认模型已自动接入 DSH
 
-1. 打开 **供应商** 标签并点击 **添加供应商**。
-2. 填写渠道 ID、显示名称和 Base URL（通常到 `/v1`）。
-3. 选择 Chat Completions 或 Responses 协议。
-4. 填写 API Key；凭据变量名会随渠道 ID 自动生成，需要复用现有凭据时再手动修改。
-5. 点击 **获取全部模型**；可在保存前编辑结果。
-6. 设置优先级；如需最后兜底，勾选 **作为保底渠道**。
-7. 保存后使用卡片上的 **测试** 验证首个模型。
+保存渠道或完成官方账号登录后，页面顶部会显示 `DSH 供应商已同步（N 个模型）`。此时打开 DSH 的模型选择器即可看到 `Provider Hub` 提供的模型，无需再手工创建模型供应商。
 
-新渠道的默认凭据引用是 `DSH_PROVIDER_HUB_<CHANNEL_ID>_KEY`：渠道 ID 会转成大写，所有非字母数字字符替换为下划线，例如 `openai-official` → `DSH_PROVIDER_HUB_OPENAI_OFFICIAL_KEY`。即使旧版前端提交空字符串，Host 也会执行同一回退。API Key 只写入 DSH credentials；保存后的 `provider-hub.json` 不包含明文密钥。
+如果仍显示“等待可用模型”，请先确认渠道的模型列表不为空，或在 **官方账号** 标签点击 **刷新账号**。插件不会自动切换当前会话或默认模型，用户可在模型选择器中自行选择。
 
-## 接入 DSH Models
+## 自动接入 DSH Models 的规则
 
 Provider Hub 默认在 `127.0.0.1:19529` 提供统一接口。服务成功启动且聚合目录至少包含一个模型后，插件会通过 DSH 官方 settings 服务自动创建或更新 `llm-pi-ai.providers.provider-hub`：
 

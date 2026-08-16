@@ -1,6 +1,6 @@
 {
   "name": "@hewhenjay/dsh-provider-hub",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Native DSH provider hub with model discovery, secure API channels, official account OAuth, failover, and logs",
   "type": "module",
   "main": "index.js",
@@ -13,7 +13,7 @@
     "./sidecar": "./sidecar.js",
     "./package.json": "./package.json"
   },
-  "files": ["index.js", "routing.js", "sidecar.js", "web-client.js", "cordis.patch.yml", "config.example.json", "README.md", "LICENSE"],
+  "files": ["index.js", "routing.js", "sidecar.js", "web-client.js", "cordis.patch.yml", "config.example.json", "README.md", "LICENSE", "docs/images"],
   "license": "CC-BY-NC-SA-4.0",
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },

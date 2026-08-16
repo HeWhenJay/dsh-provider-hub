@@ -63,6 +63,9 @@ test('packed tarball includes every runtime module and imports cleanly', () => {
     assert.ok(files.includes('sidecar.js'));
     assert.ok(files.includes('index.js'));
     assert.ok(files.includes('web-client.js'));
+    for (const image of ['provider-hub-entry.png', 'provider-hub-dashboard.png', 'provider-hub-add-route.png', 'provider-hub-accounts.png']) {
+      assert.ok(files.includes(`docs/images/${image}`));
+    }
     execFileSync('tar.exe', ['-xf', tarball, '-C', destination]);
     const entry = resolve(destination, 'package', 'index.js');
     execFileSync(process.execPath, ['--input-type=module', '--eval', `import(${JSON.stringify(new URL(`file:///${entry.replaceAll('\\', '/')}`).href)}).then(m=>{if(typeof m.apply!==\"function\")process.exit(2)})`], { stdio: 'ignore' });
