@@ -1,144 +1,241 @@
-# DSH Cockpit Relay
+# DSH Provider Hub
 
-`@hewhenjay/dsh-cockpit-relay` 是 DeepSeek Harness 的本地 OpenAI-compatible 网关。v0.2 增加原生 DSH Web 管理界面：安装后可从左侧栏 **Cockpit Relay** 按钮或 Settings 的 **Cockpit Relay** 页面管理服务、账号/API 渠道和脱敏请求日志。
+`@hewhenjay/dsh-provider-hub` 是面向 DeepSeek Harness（DSH）的独立本地模型服务中心。它把 API Key 渠道、OpenAI-compatible 中转站和 Codex / Claude / Gemini 官方账号放进同一套路由、故障切换与日志界面中。
 
-它让上游 API Key 留在运行 DSH 的本机，并向 DSH、可信局域网客户端和其他 OpenAI-compatible 应用提供一个稳定入口。
+安装 Provider Hub 不要求安装 Cockpit Desktop，也不会读取、停止或接管已有 Cockpit 服务。官方账号能力由插件自行管理的 loopback sidecar 提供；sidecar 使用上游 CLIProxyAPI 的固定版本，并在首次安装时校验官方 SHA-256。
 
-## v0.2 功能
+## 能力概览
 
-- API 服务默认开启，首选 `http://127.0.0.1:19529/v1`，可在 Web 中热关闭或重启。
-- 目标端口若已被原 Cockpit 或其他服务占用，会向后寻找空闲端口；不会终止、替换或接管占用进程。UI 显示实际 Base URL。
-- DSH 风格的侧栏按钮、快速管理 Modal 和 Settings 独立页面。
-- 从 Web 添加、编辑、删除和测试中转站/API-key 渠道。
-- API Key 由 DSH credentials 服务持久化；普通配置只保存凭据引用名。
-- 普通渠道按优先级路由，官方/正常价格账号可标记为保底渠道。
-- 429、常见 5xx 和网络故障冷却、自动切换、模型别名和会话亲和。
-- 内存脱敏日志：时间、模型、选中渠道、HTTP 状态、延迟和安全错误摘要。
-- LAN 监听必须配置独立客户端访问密钥。
-- `/v1/chat/completions`、`/v1/responses`、`/v1/models`、`/health`。
+- DSH Web 原生入口：左侧栏按钮与 Settings 页面。
+- 内置官方账号服务：OpenAI / Codex、Anthropic / Claude、Google / Gemini 官方 OAuth。
+- API Key 渠道：官方 API、中转站、本地网关或其他 OpenAI-compatible 服务。
+- 模型发现：优先复用 DSH 自带的一键模型发现，失败时直接读取供应商 `/models`。
+- 聚合 OpenAI-compatible API：`/v1/models`、`/v1/chat/completions`、`/v1/responses`。
+- 路由控制：优先级、普通/保底渠道、瞬时故障冷却、最大尝试次数、会话粘性和模型别名。
+- 安全凭据：实际密钥写入 DSH credentials；JSON 配置仅保存凭据引用。
+- 脱敏日志：只保留渠道、模型、HTTP 状态和延迟，不记录提示词、密钥或完整上游 URL。
+- 非侵入端口避让：端口被占用时只选择后续空闲端口，绝不按端口结束其他进程。
 
 ## 安装
 
-```powershell
-dsh plugin --profile web add @hewhenjay/dsh-cockpit-relay
+要求：DSH `0.1.0-rc.6` 或兼容版本、Node.js 20+，以及首次安装内置账号服务时可访问 GitHub Releases。
+
+```bash
+dsh plugin --profile web add @hewhenjay/dsh-provider-hub
 ```
 
-也可传 GitHub 或本地 `.tgz` 包。首次安装后在方便时重启 `dsh web` 并刷新 `http://127.0.0.1:3080`。不要为了安装插件强制停止正在承载会话或模型调用的 DSH/Cockpit 服务。
+也可以安装 release 中的 `.tgz`。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
-Host 入口和浏览器产物刻意分离为 `index.js` 与 `web-client.js`，避免服务端模块和 Web bundle 使用同名构建产物而互相覆盖。包同时显式导出 `./package.json`，供 DSH Client Module Registry 读取 `dsh.client` 声明。
+安装后可从左侧栏底部的 **Provider Hub** 或 **Settings → Provider Hub** 进入。
 
-## 添加账号和 API 服务
+## 快速开始
 
-从 DSH 左侧栏打开 **Cockpit Relay**，点击 **添加账号**。每个渠道可配置：
+### 登录官方账号
 
-- **渠道 ID**：稳定标识，例如 `cheap-a`、`official-openai`。
-- **显示名称**：状态卡和日志中的名称。
-- **Base URL**：上游 OpenAI-compatible `/v1` 地址。
-- **凭据变量名**：例如 `CHEAP_A_API_KEY`；留空时自动生成。
-- **API Key**：保存到 DSH 本机 credentials，保存后不会返回浏览器。
-- **模型列表**：上游接受的客户端模型 ID，逗号分隔；留空表示接受任意模型名。
-- **优先级**：普通渠道中数值越大越先使用。
-- **保底渠道**：仅当普通渠道均不可用时使用。
-- **模型别名**：本地模型 ID 到上游实际模型 ID 的 JSON 映射。
+1. 打开 **Provider Hub → 官方账号**。
+2. 如 sidecar 尚未安装，点击 **安装并启动**。
+3. 选择 **OpenAI / Codex**、**Anthropic / Claude** 或 **Google / Gemini**。
+4. 在浏览器完成官方授权。
+5. 返回 DSH；页面会轮询授权状态并自动刷新账号与模型。
 
-点击 **测试** 会通过该渠道发送一个很小的非流式请求，会消耗上游额度。
+账号服务启动后，Provider Hub 会生成一个只存在于运行时的内部渠道。它使用 sidecar 返回的模型目录和账号服务优先级参与统一路由，不会把内部访问密钥返回浏览器，也不会把内部渠道写进 `routes` 配置。
 
-### 官方 API Key
+OAuth 使用官方固定的 localhost 回调端口：
 
-OpenAI、DeepSeek 以及提供 OpenAI-compatible Chat Completions/Responses 的 Claude、Gemini、Qwen、Kimi、Grok、GLM、MiniMax、Mistral、Llama 等渠道均可添加。官方渠道可设为普通渠道，也可标记为正常价格保底。
+| 供应商 | 回调端口 |
+|---|---:|
+| OpenAI / Codex | 1455 |
+| Anthropic / Claude | 54545 |
+| Google / Gemini | 8085 |
 
-### 登录 / OAuth 账号
+Provider Hub 只在 `127.0.0.1` 上临时监听对应端口并校验 OAuth state。若端口已被占用，登录会明确失败；插件不会关闭占用者。释放端口后重新发起登录即可。
 
-轻量 relay 不直接执行 ChatGPT Plus、Claude Pro 或 Google OAuth 登录。需要账号池时，先由完整 Cockpit sidecar 管理浏览器登录、Cookie、refresh token 和原生协议，再把 sidecar 的本地 OpenAI-compatible URL 添加为一个 Cockpit Relay 渠道。
+### 添加 API Key 或中转渠道
 
-这样 UI 不会误导用户以为轻量插件本身持有 OAuth 会话。
+1. 打开 **供应商** 标签并点击 **添加供应商**。
+2. 填写渠道 ID、显示名称和 Base URL（通常到 `/v1`）。
+3. 选择 Chat Completions 或 Responses 协议。
+4. 填写凭据变量名与 API Key。
+5. 点击 **获取全部模型**；可在保存前编辑结果。
+6. 设置优先级；如需最后兜底，勾选 **作为保底渠道**。
+7. 保存后使用卡片上的 **测试** 验证首个模型。
 
-## 在 DSH 中使用
+新渠道的默认凭据引用是 `DSH_PROVIDER_HUB_<CHANNEL_ID>_KEY`。API Key 只写入 DSH credentials；保存后的 `provider-hub.json` 不包含明文密钥。
 
-在 DSH Models 中添加 OpenAI-compatible provider，Base URL 使用管理台显示的实际地址，例如：
+## 接入 DSH Models
+
+Provider Hub 默认在 `127.0.0.1:19529` 提供统一接口。实际 Base URL 会显示在页面顶部，例如：
 
 ```text
-Base URL: http://127.0.0.1:19529/v1
-API Key: 仅当 Cockpit Relay 配置了客户端访问密钥时填写
+http://127.0.0.1:19529/v1
 ```
 
-如果 `19529` 已被原 Cockpit 服务占用，插件会显示类似 `http://127.0.0.1:19530/v1` 的实际地址。请使用该地址，不要关闭原服务。
+在 DSH Models 中添加 OpenAI-compatible provider：
 
-Relay 负责上游路由和故障切换；DSH 内置 `llm-pi-ai` 继续负责消息、工具调用、reasoning 事件和模型协议适配。安装插件不会自动替换现有 DSH 模型 provider 或当前 Cockpit 上游配置。
+- Base URL：使用页面显示的实际 Base URL；
+- API：根据客户端需求选择 Chat Completions 或 Responses；
+- API Key：仅在 Provider Hub 的客户端访问密钥已配置时填写同一密钥；
+- 模型：可使用 DSH 的一键发现读取 Provider Hub 聚合目录。
 
-## 服务与 LAN 设置
+插件不会自动替换当前 DSH 模型 provider，也不会改动现有上游。请在确认新服务可用后由用户自行切换模型配置。
 
-API 服务默认开启。点击 **服务设置** 可修改：
+## 路由规则
 
-- `127.0.0.1`：默认，仅本机访问。
-- `0.0.0.0`：可信局域网访问。
-- 首选监听端口：默认 `19529`；占用时自动避让至后续空闲端口。
-- 客户端访问密钥的凭据引用和值。
+对每次请求，Provider Hub 按以下顺序选择渠道：
 
-LAN 模式在没有客户端密钥时拒绝启动。LAN 客户端请求需携带：
+1. 过滤不能服务该模型的渠道；空模型列表表示允许所有模型。
+2. 普通渠道按优先级从高到低排序。
+3. 保底渠道按优先级从高到低排在普通渠道之后。
+4. 遇到 `408`、`409`、`425`、`429`、`500`、`502`、`503`、`504` 或连接重置时，将渠道暂时冷却。
+5. 在 `maxAttempts` 范围内尝试后续渠道。
+6. 启用会话粘性时，同一 session 优先复用已成功的健康渠道；失效时自动重选。
 
-```http
-Authorization: Bearer <client-key>
-```
+内置官方账号渠道默认优先级为 `1000`，可在账号服务设置中修改。它与自定义 API 渠道使用相同排序规则。自定义渠道可标记为保底。
 
-不要把 relay 直接暴露到公网。远程使用请配合防火墙、VPN 或带认证的反向代理。
-
-## 日志与隐私
-
-管理台最多保留 500 条请求尝试记录，仅驻留内存，重启 DSH 后清空。日志不记录提示词、响应正文、Authorization、API Key、自定义上游 headers 或完整上游 URL；错误文本在送到浏览器前还会再次移除 URL 和 secret-shaped 字符串。
-
-## 文件配置
-
-默认配置位于 `$DSH_HOME/cockpit-relay.json`。启动 DSH 前设置 `DSH_COCKPIT_CONFIG` 可改用其他文件。`config.example.json` 展示完整结构。
+模型别名是“Provider Hub 对外模型 ID → 供应商真实模型 ID”的映射，例如：
 
 ```json
 {
+  "gpt-main": "vendor-gpt-2026-01"
+}
+```
+
+客户端请求 `gpt-main` 时，该渠道会把模型名改写为 `vendor-gpt-2026-01`。
+
+## 内置账号 sidecar
+
+Provider Hub 当前固定使用：
+
+- 上游项目：[`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI)
+- 版本：`v7.2.133`
+- 许可证：MIT
+- 下载源：该项目的官方 GitHub Release
+- 完整性：先下载 `checksums.txt`，再按精确资源名校验 SHA-256
+
+支持 Windows、macOS 和 Linux 的 x64 / arm64。文件位于 `$DSH_HOME/provider-hub/sidecar`：
+
+```text
+provider-hub/sidecar/
+├─ auth/                  # 官方账号授权文件
+├─ bin/7.2.133/           # 已校验的 sidecar 可执行文件
+├─ downloads/             # 临时下载目录（成功后清理）
+└─ config.yaml            # 仅本机配置
+```
+
+安全与生命周期边界：
+
+- 固定监听 `127.0.0.1`；
+- 首选端口 `19629`，被占用时最多向后搜索 49 个端口；
+- Management API 禁止远程访问，内置控制面板关闭；
+- client key 与 management key 随机生成并写入 DSH credentials；
+- 插件只保存并终止自己启动的子进程，绝不根据端口查杀进程；
+- 下载、安装或启动失败只影响官方账号渠道，不妨碍自定义 API 渠道和 Provider Hub relay 启动。
+
+关闭“未安装时自动下载”后，启动缺失的 sidecar 会显示“未安装”，不会访问网络。仍可在页面中手动点击 **安装并启动**。
+
+## 配置
+
+默认配置文件是 `$DSH_HOME/provider-hub.json`。完整示例见 `config.example.json`：
+
+```json
+{
+  "provider": "provider-hub",
+  "maxAttempts": 6,
+  "cooldownMs": 30000,
+  "sessionAffinity": true,
   "listen": {
     "enabled": true,
     "host": "127.0.0.1",
     "port": 19529,
-    "apiKeyEnv": "DSH_COCKPIT_CLIENT_KEY"
+    "apiKeyEnv": "DSH_PROVIDER_HUB_CLIENT_KEY"
   },
-  "maxAttempts": 6,
-  "cooldownMs": 30000,
-  "sessionAffinity": true,
-  "routes": [
-    {
-      "id": "cheap-a",
-      "displayName": "Cheap relay A",
-      "baseURL": "https://relay-a.example/v1",
-      "api": "openai-completions",
-      "apiKeyEnv": "CHEAP_A_API_KEY",
-      "priority": 100,
-      "backup": false,
-      "models": ["gpt-4o-mini", "deepseek-chat"]
-    },
-    {
-      "id": "official-backup",
-      "displayName": "Official backup",
-      "baseURL": "https://api.openai.com/v1",
-      "apiKeyEnv": "OPENAI_API_KEY",
-      "priority": 0,
-      "backup": true,
-      "models": ["gpt-4o-mini"]
-    }
-  ]
+  "accountService": {
+    "enabled": true,
+    "autoInstall": true,
+    "port": 19629,
+    "priority": 1000
+  },
+  "routes": []
 }
 ```
 
-## 模型范围
+环境变量 `DSH_PROVIDER_HUB_CONFIG` 可指定其他配置路径。
 
-插件不限制 GPT。只要至少一个渠道接受本地模型 ID，或通过 `modelAliases` 映射到上游模型，就可以使用。原生 Anthropic Messages、Gemini native API、图片生成、OAuth 生命周期和账号池仍由完整 sidecar 或专用 DSH provider 插件负责。
+### 端口与监听安全
 
-## 开发验证
+- Relay 默认只监听 `127.0.0.1:19529`。
+- sidecar 始终只监听 `127.0.0.1`，首选 `19629`。
+- 两者发生端口冲突时都会向后寻找空闲端口，不会关闭原监听器。
+- 将 relay 改为 `0.0.0.0` 前必须配置客户端访问密钥，否则服务拒绝启动。
+- 不要把 relay 直接暴露到公网；远程使用应配合防火墙、VPN 或带认证的反向代理。
 
-```powershell
+## HTTP 接口
+
+统一 relay：
+
+```text
+GET  /health
+GET  /v1/models
+POST /v1/chat/completions
+POST /v1/responses
+```
+
+DSH Host 管理接口（供插件 Web UI 使用）：
+
+```text
+GET    /api/provider-hub/state
+GET    /api/provider-hub/logs
+DELETE /api/provider-hub/logs
+PUT    /api/provider-hub/service
+POST   /api/provider-hub/models/discover
+POST   /api/provider-hub/routes
+DELETE /api/provider-hub/routes/:id
+POST   /api/provider-hub/routes/:id/test
+
+GET    /api/provider-hub/account-service
+PUT    /api/provider-hub/account-service
+POST   /api/provider-hub/account-service/install
+POST   /api/provider-hub/account-service/start
+POST   /api/provider-hub/account-service/stop
+POST   /api/provider-hub/account-service/refresh
+POST   /api/provider-hub/account-service/oauth/:provider/start
+GET    /api/provider-hub/account-service/oauth/status?state=...
+PATCH  /api/provider-hub/account-service/accounts/:id/status
+DELETE /api/provider-hub/account-service/accounts/:id
+```
+
+管理响应只返回脱敏状态。sidecar client key、management key、供应商 API Key、OAuth token 和账号文件内容不会返回 Web Client。
+
+## 从 DSH Cockpit Relay 迁移
+
+v0.3 更名为 DSH Provider Hub，并从“桥接外部 Cockpit”迁移为独立内置账号服务。
+
+1. 如果 `$DSH_HOME/provider-hub.json` 已存在，直接使用新文件。
+2. 否则若 `$DSH_HOME/cockpit-relay.json` 存在，读取旧配置、按新结构规范化并写入 `provider-hub.json`。
+3. 旧文件保留，不删除、不覆盖。
+4. 旧渠道的凭据引用（例如 `COCKPIT_RELAY_*`）原样保留，因此不会丢失已有 DSH credential。
+5. 新建渠道使用 `DSH_PROVIDER_HUB_*` 命名。
+6. `/api/cockpit-relay` 暂时作为管理 API 兼容别名保留；新 Web Client 只调用 `/api/provider-hub`。
+
+迁移不会修改当前 DSH Models provider，也不会接管任何已经监听的 Cockpit 端口。
+
+## 故障排查
+
+- **Provider Hub 显示不同端口**：首选端口已占用。使用页面显示的实际 Base URL，不要关闭未知监听器。
+- **账号服务安装失败**：确认 GitHub Releases 可访问、DSH Home 可写、系统架构受支持。SHA-256 不匹配时插件会删除下载并拒绝执行。
+- **OAuth 无法开始**：固定 localhost 回调端口可能已占用。插件不会抢占；释放相应端口后重试。
+- **OAuth 完成后没有模型**：点击 **刷新账号**，检查账号是否停用或暂不可用；也可保留 API Key 渠道作为普通或保底路径。
+- **DSH 无法访问 relay**：使用实际 Base URL；检查 relay 开关与客户端密钥。LAN 模式无密钥时服务会拒绝启动。
+
+## 开发与验证
+
+```bash
 npm test
 npm pack --dry-run
 ```
 
-回归测试覆盖优先/保底路由、故障冷却、凭据不写入配置、服务热启停、LAN 防护、占用端口非侵入式避让、日志脱敏、Host 在无浏览器全局时独立导入、Host/Web 产物路径隔离、`./package.json` 导出和浏览器 loader 注册。
+测试覆盖路由优先级、保底与冷却、流式响应、端口避让、凭据不落盘、日志脱敏、模型发现、账号管理契约、OAuth state 限制、sidecar 资源映射与 checksum 解析、打包边界和浏览器模块注册。
 
-## 许可
+## 许可与第三方组件
 
-上游 Cockpit Tools 默认使用 CC BY-NC-SA 4.0。本适配层保留署名并以相同许可发布，仅用于非商业学习、研究和个人使用。使用中转站或多个账号时，请遵守对应平台服务条款、账号规则和当地法律。
+Provider Hub 插件代码按仓库 `LICENSE`（CC BY-NC-SA 4.0）发布。内置账号服务二进制不打进 npm 包；首次使用时从 CLIProxyAPI 官方 Release 下载。CLIProxyAPI 由其作者按 MIT License 发布。使用官方账号、API Key、中转服务和多账号路由时，请遵守对应平台服务条款、账号政策和当地法律。

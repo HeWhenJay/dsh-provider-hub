@@ -1,10 +1,11 @@
 # Add this bundle to a DSH profile after dsh-base.
-# The relay owns the local/LAN HTTP gateway. DSH's built-in llm-pi-ai adapter
+# Provider Hub owns the local/LAN HTTP gateway. DSH's built-in llm-pi-ai adapter
 # should point at http://127.0.0.1:<port>/v1 as an OpenAI-compatible provider.
 - insert:
-    - id: cockpit-relay
-      name: '@hewhenjay/dsh-cockpit-relay'
+    - id: provider-hub
+      name: '@hewhenjay/dsh-provider-hub'
       inject:
         - credentials
       config:
-        configFile: !!js process.env.DSH_COCKPIT_CONFIG || dshHomePath('cockpit-relay.json')
+        configFile: !!js process.env.DSH_PROVIDER_HUB_CONFIG || dshHomePath('provider-hub.json')
+        legacyConfigFile: !!js process.env.DSH_COCKPIT_CONFIG || dshHomePath('cockpit-relay.json')

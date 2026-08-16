@@ -1,5 +1,5 @@
-const DEFAULT_PROVIDER = 'cockpit-relay';
-const DEFAULT_CLIENT_KEY_ENV = 'DSH_COCKPIT_CLIENT_KEY';
+const DEFAULT_PROVIDER = 'provider-hub';
+const DEFAULT_CLIENT_KEY_ENV = 'DSH_PROVIDER_HUB_CLIENT_KEY';
 const TRANSIENT_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 function asString(value, fallback = '') {
@@ -13,6 +13,7 @@ function asPositiveInt(value, fallback) {
 export function normalizeConfig(raw = {}) {
   const input = raw && typeof raw === 'object' ? raw : {};
   const listen = input.listen && typeof input.listen === 'object' ? input.listen : {};
+  const accountService = input.accountService && typeof input.accountService === 'object' ? input.accountService : {};
   const routes = Array.isArray(input.routes) ? input.routes : [];
   const normalizedRoutes = routes.map((route, index) => {
     const value = route && typeof route === 'object' ? route : {};
@@ -23,7 +24,7 @@ export function normalizeConfig(raw = {}) {
       displayName: asString(value.displayName, asString(value.id, `Route ${index + 1}`)),
       baseURL: asString(value.baseURL).replace(/\/+$/, ''),
       api: value.api === 'openai-responses' ? 'openai-responses' : 'openai-completions',
-      apiKeyEnv: asString(value.apiKeyEnv, `COCKPIT_RELAY_${asString(value.id, `ROUTE_${index + 1}`).toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY`),
+      apiKeyEnv: asString(value.apiKeyEnv, `DSH_PROVIDER_HUB_${asString(value.id, `ROUTE_${index + 1}`).toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY`),
       priority: Number.isFinite(value.priority) ? Number(value.priority) : 0,
       backup: value.backup === true,
       models: [...new Set(models)],
@@ -41,6 +42,12 @@ export function normalizeConfig(raw = {}) {
       host: listen.host === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1',
       port: Number.isInteger(listen.port) && listen.port >= 0 && listen.port <= 65535 ? listen.port : 19529,
       apiKeyEnv: asString(listen.apiKeyEnv, DEFAULT_CLIENT_KEY_ENV)
+    },
+    accountService: {
+      enabled: accountService.enabled !== false,
+      autoInstall: accountService.autoInstall !== false,
+      port: Number.isInteger(accountService.port) && accountService.port > 0 && accountService.port <= 65535 ? accountService.port : 19629,
+      priority: Number.isFinite(accountService.priority) ? Number(accountService.priority) : 1000
     },
     routes: normalizedRoutes
   };

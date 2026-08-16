@@ -5,7 +5,7 @@ import { ChannelRouter, normalizeConfig } from '../routing.js';
 test('normal channels are tried before backup channels', async () => {
   const calls = [];
   const router = new ChannelRouter(normalizeConfig({
-    provider: 'cockpit-relay',
+    provider: 'provider-hub',
     maxAttempts: 4,
     routes: [
       { id: 'cheap', baseURL: 'https://cheap.invalid/v1', api: 'openai-completions', models: ['gpt-test'], priority: 100 },

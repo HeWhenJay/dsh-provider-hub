@@ -1,47 +1,46 @@
 {
+  "provider": "provider-hub",
+  "maxAttempts": 6,
+  "cooldownMs": 30000,
+  "sessionAffinity": true,
   "listen": {
     "enabled": true,
     "host": "127.0.0.1",
     "port": 19529,
-    "apiKeyEnv": "DSH_COCKPIT_CLIENT_KEY"
+    "apiKeyEnv": "DSH_PROVIDER_HUB_CLIENT_KEY"
   },
-  "provider": "cockpit-relay",
-  "maxAttempts": 6,
-  "cooldownMs": 30000,
-  "sessionAffinity": true,
+  "accountService": {
+    "enabled": true,
+    "autoInstall": true,
+    "port": 19629,
+    "priority": 1000
+  },
   "routes": [
     {
-      "id": "cheap-openai-1",
-      "displayName": "低价中转站 A",
-      "baseURL": "https://example-a.invalid/v1",
-      "api": "openai-completions",
-      "apiKeyEnv": "CHEAP_OPENAI_A_KEY",
-      "priority": 100,
-      "backup": false,
-      "models": ["gpt-4o-mini", "claude-3-7-sonnet", "gemini-2.5-pro"],
-      "modelAliases": {}
-    },
-    {
-      "id": "cheap-openai-2",
-      "displayName": "低价中转站 B",
-      "baseURL": "https://example-b.invalid/v1",
-      "api": "openai-completions",
-      "apiKeyEnv": "CHEAP_OPENAI_B_KEY",
-      "priority": 90,
-      "backup": false,
-      "models": ["gpt-4o-mini", "deepseek-chat", "qwen-max", "kimi-k2.5"],
-      "modelAliases": {}
-    },
-    {
-      "id": "normal-price-backup",
-      "displayName": "正常价格保底",
+      "id": "openai-official",
+      "displayName": "OpenAI Official API",
       "baseURL": "https://api.openai.com/v1",
-      "api": "openai-completions",
+      "api": "openai-responses",
       "apiKeyEnv": "OPENAI_API_KEY",
+      "priority": 500,
+      "backup": false,
+      "models": ["gpt-5.4"],
+      "modelAliases": {},
+      "headers": {}
+    },
+    {
+      "id": "fallback-relay",
+      "displayName": "Fallback OpenAI-compatible Relay",
+      "baseURL": "https://relay.example/v1",
+      "api": "openai-completions",
+      "apiKeyEnv": "DSH_PROVIDER_HUB_FALLBACK_RELAY_KEY",
       "priority": 10,
       "backup": true,
-      "models": ["gpt-4o-mini", "gpt-4.1"],
-      "modelAliases": {}
+      "models": ["gpt-5.4"],
+      "modelAliases": {
+        "gpt-5.4": "vendor-model-name"
+      },
+      "headers": {}
     }
   ]
 }
