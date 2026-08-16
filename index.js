@@ -537,7 +537,7 @@ class RelayRuntime {
       api: 'openai-completions',
       baseURL: this.relayBaseURL(),
       models,
-      ...(keyConfigured ? { apiKeyEnv: this.config.listen.apiKeyEnv } : {})
+      ...(keyConfigured && this.config.listen.host === '0.0.0.0' ? { apiKeyEnv: this.config.listen.apiKeyEnv } : {})
     };
     const shouldExist = managed.enabled && this.config.listen.enabled && Boolean(this.server?.listening) && models.length > 0;
     const ownsExisting = managed.owned && managed.lastProfile && sameJson(userExisting, managed.lastProfile);
@@ -640,7 +640,7 @@ class RelayRuntime {
     const selectedIds = Array.isArray(options.modelIds) ? new Set(options.modelIds) : undefined;
     const models = this.researchableModels({ missingOnly: options.missingOnly === true }).filter((model) => !selectedIds || selectedIds.has(model.id)).slice(0, MAX_RESEARCH_MODELS);
     for (const model of models) this.automaticResearchAttempted.add(model.id);
-    this.specResearch = { phase: 'running', automatic: options.automatic === true, total: models.length, completed: 0, updated: 0, skipped: 0, failed: 0, currentModel: undefined, sources: [], results: [], startedAt: new Date().toISOString() };
+    this.specResearch = { phase: 'running', automatic: options.automatic === true, selection: { ...selection }, total: models.length, completed: 0, updated: 0, skipped: 0, failed: 0, currentModel: undefined, sources: [], results: [], startedAt: new Date().toISOString() };
     try {
       for (const model of models) {
         controller.signal.throwIfAborted();
@@ -719,7 +719,8 @@ class RelayRuntime {
         error: specification ? undefined : result?.error
       };
     });
-    return { ...this.specResearch, sources: [...new Set([...(this.specResearch.sources ?? []), ...persistedSources])], available: Boolean(this.llmService()?.stream && this.webService()?.search), models };
+    const fallback = this.defaultModelService()?.currentSelection?.();
+    return { ...this.specResearch, selection: this.specResearch.selection ?? (fallback ? { provider: fallback.provider, model: fallback.model } : undefined), sources: [...new Set([...(this.specResearch.sources ?? []), ...persistedSources])], available: Boolean(this.llmService()?.stream && this.webService()?.search), models };
   }
 
   async secret(name) {
@@ -744,7 +745,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.3', ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.4', ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',
@@ -913,7 +914,8 @@ class RelayRuntime {
 
   async clientAuthorized(req) {
     const expected = await this.secret(this.config.listen.apiKeyEnv);
-    if (!expected) return this.config.listen.host === '127.0.0.1' && !req.headers.origin;
+    if (this.config.listen.host === '127.0.0.1' && !req.headers.origin && !req.headers.authorization) return true;
+    if (!expected) return false;
     return asString(req.headers.authorization).replace(/^Bearer\s+/i, '') === expected;
   }
 

@@ -366,6 +366,15 @@ test('autoInstall false does not download a missing sidecar', async () => {
   } finally { await fixture.dispose(); }
 });
 
+test('loopback host requests may omit auth while browser-origin requests still require the key', async () => {
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [] });
+  try {
+    await fixture.instance.start();
+    assert.equal((await fetch(`${fixture.instance.relayBaseURL()}/models`)).status, 200);
+    assert.equal((await fetch(`${fixture.instance.relayBaseURL()}/models`, { headers: { origin: 'http://evil.example' } })).status, 401);
+  } finally { await fixture.dispose(); }
+});
+
 test('browser-origin requests cannot use an unkeyed local service', async () => {
   const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1', apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [] });
   try {
@@ -437,7 +446,7 @@ test('managed DSH provider uses the actual fallback port and preserves unrelated
     assert.notEqual(fixture.instance.actualPort, preferredPort);
     assert.equal(providers['provider-hub'].baseURL, `http://127.0.0.1:${fixture.instance.actualPort}/v1`);
     assert.equal(providers['provider-hub'].api, 'openai-completions');
-    assert.equal(providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
+    assert.equal('apiKeyEnv' in providers['provider-hub'], false);
     assert.deepEqual(providers['provider-hub'].models.map((model) => model.id), ['gpt-a', 'gpt-shared', 'gpt-b']);
     assert.equal(providers['local-cockpit'].models[0].id, 'gpt-existing');
     assert.equal(providers.fastapi.models[0].id, 'gpt-fast');
@@ -450,13 +459,17 @@ test('managed DSH provider uses the actual fallback port and preserves unrelated
   }
 });
 
-test('managed DSH provider includes the relay credential reference only when configured', async () => {
-  const settingsService = settings();
-  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, { CLIENT_KEY: 'ph-client-secret' }, settingsService);
+test('managed DSH provider omits the credential ref for loopback but includes it for LAN', async () => {
+  const loopbackSettings = settings();
+  const loopback = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, { CLIENT_KEY: 'ph-client-secret' }, loopbackSettings);
+  const lanSettings = settings();
+  const lan = runtime({ listen: { enabled: true, host: '0.0.0.0', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, { CLIENT_KEY: 'ph-client-secret' }, lanSettings);
   try {
-    await fixture.instance.start();
-    assert.equal(settingsService.snapshot().providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
-  } finally { await fixture.dispose(); }
+    await loopback.instance.start();
+    assert.equal('apiKeyEnv' in loopbackSettings.snapshot().providers['provider-hub'], false);
+    await lan.instance.start();
+    assert.equal(lanSettings.snapshot().providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
+  } finally { await loopback.dispose(); await lan.dispose(); }
 });
 
 test('managed DSH provider removes only its owned entry when models become empty', async () => {

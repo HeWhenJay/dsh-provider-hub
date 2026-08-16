@@ -31,7 +31,7 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 - 最大输出窗口；
 - 兼容的思考格式与官方证据来源。
 
-每个字段独立验证：官方资料查到什么就填写什么，没查到的字段保持空白，不用模型记忆猜测。配置页的 **模型规格** 区域会逐模型展示已填写字段、待补全字段、官方来源和失败原因；自动任务缺少证据或发生错误时，才显示手动 **重新补全规格** 按钮。验证通过的内容会热同步到 DSH 自动管理的 `provider-hub` 模型供应商，无需为单次补全重启 Web。
+每个字段独立验证：官方资料查到什么就填写什么，没查到的字段保持空白，不用模型记忆猜测。自动任务使用 DSH 的当前 `agent-default-model`，**模型规格** 页会明确显示本次研究调用的 `provider / model`。配置页会逐模型展示已填写字段、待补全字段、官方来源和失败原因；自动任务缺少证据或发生错误时，才显示手动 **重新补全规格** 按钮。验证通过的内容会热同步到 DSH 自动管理的 `provider-hub` 模型供应商，无需为单次补全重启 Web。
 
 ![逐模型查看完整、部分补全、缺少证据与失败状态](docs/images/provider-hub-model-specs.png)
 
@@ -56,16 +56,16 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.3
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.4
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.3.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.4.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.3.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.4.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.3 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.4 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 
@@ -151,7 +151,7 @@ Provider Hub 默认在 `127.0.0.1:19529` 提供统一接口。服务成功启动
 - Base URL 使用页面显示的实际地址，包括端口冲突后的自动避让端口；
 - API 固定为 OpenAI Chat Completions；
 - 模型从 Provider Hub 的聚合 `/v1/models` 目录读取、去重；每个 Key 非空白名单之外的模型不会进入聚合目录，并尽可能保留名称、上下文窗口和最大输出长度；
-- 首次启动会自动生成客户端访问密钥，因此自动管理的供应商会写入对应 `apiKeyEnv`；
+- 首次启动会自动生成客户端访问密钥；仅本机 `127.0.0.1` 模式下，DSH Host 通过无浏览器 Origin 的 loopback 请求直接访问，不在托管供应商中声明 `apiKeyEnv`，避免凭据同步时序阻断模型调用；LAN 模式仍写入并强制 `apiKeyEnv`；
 - 渠道、官方账号或 sidecar 模型变化后会自动重新同步。
 
 插件只管理 `provider-hub` 这一条供应商，不修改其他供应商，也不会切换 `agent-default-model`。如果用户已经手工创建了同名条目，插件会报告冲突并保持原配置不变。Relay 停止、禁用或聚合模型为空时，插件只删除经自身确认创建的条目；模型为空时状态显示为等待，不写入 DSH 无法使用的空模型供应商。
