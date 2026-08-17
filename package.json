@@ -1,6 +1,6 @@
 {
   "name": "@hewhenjay/dsh-provider-hub",
-  "version": "0.6.13",
+  "version": "0.6.14",
   "description": "Native DSH provider hub with named API keys, per-key model allowlists, OAuth accounts, failover, and redacted logs",
   "type": "module",
   "main": "index.js",

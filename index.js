@@ -326,7 +326,7 @@ function platformOfficialSource(raw, authority) {
 
 function openAIPlatformSources(model) {
   if (!/^gpt-[a-z0-9.-]{1,80}$/i.test(model.id)) return [];
-  const slug = model.id.replace(/^gpt-/i, 'gpt-').replaceAll('.', '').replaceAll('-', '-');
+  const slug = model.id.toLowerCase() === 'gpt-5.5' ? 'gpt-55' : model.id.replace(/^gpt-/i, 'gpt-').replaceAll('.', '');
   return [
     { url: `https://ai.azure.com/catalog/models/${encodeURIComponent(model.id)}`, title: `${model.id} - Microsoft Azure AI model catalog`, platformOfficial: true },
     { url: `https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-${slug}.html`, title: `${model.id} - AWS Bedrock model card`, platformOfficial: true }
@@ -376,7 +376,7 @@ function fetchPinnedResearchSource(target, signal) {
       servername: parsed.hostname,
       path: `${parsed.pathname}${parsed.search}`,
       method: 'GET',
-      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.13' },
+      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.14' },
       timeout: RESEARCH_FETCH_TIMEOUT_MS,
       signal
     }, (response) => {
@@ -507,6 +507,7 @@ function validateSpecification(raw, expectedModel, _allowedSources, authority, e
   const value = raw && typeof raw === 'object' ? raw : {};
   if (asString(value.id) !== expectedModel) throw new Error(`research result id must equal ${expectedModel}`);
   const hasExplicitMaximumContextWindow = Number.isInteger(Number(value.maximumContextWindow)) && Number(value.maximumContextWindow) > 0;
+  const hasLegacyContextWindow = !hasExplicitMaximumContextWindow && Number.isInteger(Number(value.contextWindow)) && Number(value.contextWindow) > 0;
   const reportedMaximumContextWindow = Number(hasExplicitMaximumContextWindow ? value.maximumContextWindow : value.contextWindow);
   const reportedRecommendedContextWindow = Number(value.recommendedContextWindow);
   const reportedMaxTokens = Number(value.maxTokens);
@@ -1189,7 +1190,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.13', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.14', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',
