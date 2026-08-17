@@ -653,6 +653,41 @@ test('managed DSH provider includes the credential ref for loopback and LAN', as
   } finally { await loopback.dispose(); await lan.dispose(); }
 });
 
+test('legacy owned snapshot migrates only the relay apiKeyEnv field', async () => {
+  const settingsService = settings();
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, { CLIENT_KEY: 'ph-client-secret' }, settingsService);
+  try {
+    await fixture.instance.start();
+    const current = structuredClone(settingsService.snapshot().providers['provider-hub']);
+    const legacy = structuredClone(current);
+    delete legacy.apiKeyEnv;
+    fixture.instance.config.managedProvider.owned = true;
+    fixture.instance.config.managedProvider.lastProfile = legacy;
+    await fixture.instance.syncManagedProvider();
+    assert.equal(fixture.instance.managedProviderState.status, 'synced');
+    assert.equal(settingsService.snapshot().providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
+    assert.deepEqual(fixture.instance.config.managedProvider.lastProfile, current);
+  } finally { await fixture.dispose(); }
+});
+
+test('legacy ownership migration rejects a different apiKeyEnv', async () => {
+  const settingsService = settings();
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, { CLIENT_KEY: 'ph-client-secret' }, settingsService);
+  try {
+    await fixture.instance.start();
+    const current = structuredClone(settingsService.snapshot());
+    const legacy = structuredClone(current.providers['provider-hub']);
+    delete legacy.apiKeyEnv;
+    current.providers['provider-hub'].apiKeyEnv = 'USER_DIFFERENT_KEY';
+    settingsService.replaceSection(current);
+    fixture.instance.config.managedProvider.owned = true;
+    fixture.instance.config.managedProvider.lastProfile = legacy;
+    await fixture.instance.syncManagedProvider();
+    assert.equal(fixture.instance.managedProviderState.status, 'conflict');
+    assert.equal(settingsService.snapshot().providers['provider-hub'].apiKeyEnv, 'USER_DIFFERENT_KEY');
+  } finally { await fixture.dispose(); }
+});
+
 test('managed DSH provider removes only its owned entry when models become empty', async () => {
   const settingsService = settings({ providers: { fastapi: { baseURL: 'https://fastapi.invalid/v1', api: 'openai-completions', models: [{ id: 'gpt-fast' }] } } });
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, {}, settingsService);

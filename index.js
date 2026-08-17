@@ -345,7 +345,7 @@ function fetchPinnedResearchSource(target, signal) {
       servername: parsed.hostname,
       path: `${parsed.pathname}${parsed.search}`,
       method: 'GET',
-      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.11' },
+      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.12' },
       timeout: RESEARCH_FETCH_TIMEOUT_MS,
       signal
     }, (response) => {
@@ -842,7 +842,8 @@ class RelayRuntime {
       ...(keyConfigured ? { apiKeyEnv: this.config.listen.apiKeyEnv } : {})
     };
     const shouldExist = managed.enabled && this.config.listen.enabled && Boolean(this.server?.listening) && models.length > 0;
-    const ownsExisting = managed.owned && managed.lastProfile && sameJson(userExisting, managed.lastProfile);
+    const legacyOwnedProfile = managed.owned && managed.lastProfile && keyConfigured && userExisting?.apiKeyEnv === this.config.listen.apiKeyEnv && sameJson({ ...userExisting, apiKeyEnv: undefined }, { ...managed.lastProfile, apiKeyEnv: undefined });
+    const ownsExisting = managed.owned && managed.lastProfile && (sameJson(userExisting, managed.lastProfile) || legacyOwnedProfile);
 
     if (!shouldExist) {
       if (existing && !ownsExisting) {
@@ -1136,7 +1137,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.11', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.12', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',

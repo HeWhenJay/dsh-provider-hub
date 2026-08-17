@@ -58,16 +58,16 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.11
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.12
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.11.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.12.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.11.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.12.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.11 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.12 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 
@@ -156,7 +156,7 @@ Provider Hub 默认在 `127.0.0.1:19529` 提供统一接口。服务成功启动
 - 首次启动会自动生成客户端访问密钥；只要凭据已经配置，自动管理的供应商在本机与 LAN 模式下都会声明对应 `apiKeyEnv`，使 `llm-pi-ai` 能在请求前解析 Relay Key。Relay 的 loopback 兼容规则仍允许受控的本机无 Origin 请求，但 DSH 正常模型调用会携带该 Key；
 - 渠道、官方账号或 sidecar 模型变化后会自动重新同步。
 
-插件只管理 `provider-hub` 这一条供应商，不修改其他供应商，也不会切换 `agent-default-model`。如果用户已经手工创建了同名条目，插件会报告冲突并保持原配置不变。Relay 停止、禁用或聚合模型为空时，插件只删除经自身确认创建的条目；模型为空时状态显示为等待，不写入 DSH 无法使用的空模型供应商。
+插件只管理 `provider-hub` 这一条供应商，不修改其他供应商，也不会切换 `agent-default-model`。如果用户已经手工创建了同名条目，插件会报告冲突并保持原配置不变。旧版本所有权快照仅缺少后来加入的 Relay `apiKeyEnv`，且当前条目的其他字段逐项完全一致、凭据引用也精确等于当前 Relay 配置时，插件会安全迁移快照；任何其他字段或凭据引用差异仍保持冲突。Relay 停止、禁用或聚合模型为空时，插件只删除经自身确认创建的条目；模型为空时状态显示为等待，不写入 DSH 无法使用的空模型供应商。
 
 实际 Base URL 仍会显示在页面顶部，例如：
 
