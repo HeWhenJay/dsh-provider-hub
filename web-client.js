@@ -188,7 +188,7 @@ window.__ModuleLoader__.load({
 
     function evidenceLabel(model, field) {
       const type = model.fieldEvidence?.[field]?.type;
-      return type === 'community-consensus' ? '社区共识' : type === 'platform-official' ? '平台官方证据' : type === 'official' ? '厂商官方证据' : '';
+      return type === 'community-consensus' ? '社区共识' : type === 'platform-official' ? '平台官方证据' : type === 'official' ? '厂商官方证据' : type === 'llm-researched' ? 'LLM 查询结果（可编辑）' : '';
     }
 
     function ModelSpecifications({ research }) {

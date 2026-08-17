@@ -296,9 +296,9 @@ test('researched model pricing requires matching per-million evidence before per
     await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     const pricing = fixture.instance.config.modelSpecifications['gpt-test'].modelPricing;
-    assert.deepEqual(pricing, { inputPerMillion: 1, outputPerMillion: 2, currency: 'USD' });
+    assert.deepEqual(pricing, { inputPerMillion: 1, outputPerMillion: 2, cachedInputPerMillion: 0.1, currency: 'USD' });
     assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].fieldEvidence['pricing.inputPerMillion'].type, 'official');
-    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].fieldEvidence['pricing.cachedInputPerMillion'], undefined);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].fieldEvidence['pricing.cachedInputPerMillion'].type, 'official');
   } finally { await fixture.dispose(); }
 });
 
@@ -873,7 +873,7 @@ test('two independent community sources with matching values can provide a speci
     await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 128000);
-    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].evidenceType, 'community-consensus');
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].evidenceType, 'llm-researched');
     assert.deepEqual(fixture.instance.config.modelSpecifications['gpt-test'].fieldEvidence.contextWindow.sources, sources.map((source) => source.url));
   } finally { await fixture.dispose(); }
 });
@@ -888,23 +888,25 @@ test('a source number belonging to another model cannot prove the requested mode
   try {
     await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
-    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 128000);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].evidenceType, 'llm-researched');
   } finally { await fixture.dispose(); }
 });
 
-test('one community source alone cannot establish a model specification field', async () => {
+test('one community source alone can establish an editable LLM-researched field', async () => {
   const sources = [{ url: 'https://single-blog.example/gpt-test', title: 'gpt-test model guide', snippet: 'gpt-test context window is 128000 tokens.' }];
   const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: sources.map((source) => source.url) });
   const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, undefined, researchServices(response, sources));
   try {
     await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
-    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
-    assert.equal(fixture.instance.specResearch.skipped, 1);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 128000);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].evidenceType, 'llm-researched');
+    assert.equal(fixture.instance.specResearch.updated, 1);
   } finally { await fixture.dispose(); }
 });
 
-test('community subdomains of one registrable domain do not count as independent sources', async () => {
+test('community subdomains of one registrable domain remain editable LLM research', async () => {
   const sources = [
     { url: 'https://docs.same.example/gpt-test', title: 'gpt-test docs', snippet: 'gpt-test context window is 128000 tokens.' },
     { url: 'https://blog.same.example/gpt-test', title: 'gpt-test blog', snippet: 'gpt-test context window is 128000 tokens.' }
@@ -914,7 +916,8 @@ test('community subdomains of one registrable domain do not count as independent
   try {
     await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
-    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 128000);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].evidenceType, 'llm-researched');
   } finally { await fixture.dispose(); }
 });
 
@@ -1117,6 +1120,33 @@ test('platform-official structured model data fills exact fields when the vendor
   } finally { await fixture.dispose(); }
 });
 
+test('platform fields fill exact values when the research model omits them', async () => {
+  const vendor = { url: 'https://developers.openai.com/api/docs/models/gpt-5.5', title: 'GPT-5.5 official page' };
+  const response = JSON.stringify({ id: 'GPT‑5.5', maximumContextWindow: null, recommendedContextWindow: null, maxTokens: null, reasoningEfforts: null, modelPricing: null, sources: [] });
+  const services = researchServices(response, [vendor]);
+  delete services.providerHubResearchFetch.fetch;
+  services.providerHubResearchFetch.lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+  services.providerHubResearchFetch.request = async (target) => target.parsed.hostname === 'ai.azure.com'
+    ? { status: 200, contentType: 'text/html', text: '<script>"other-model","textContextWindow",999999,"OpenAI GPT‑5.5","textContextWindow",1050000,"maxOutputTokens",128000,"gpt-5.5-pro","textContextWindow",777777</script>' }
+    : { status: 403, contentType: 'text/plain', text: 'blocked' };
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-5.5'] }] }, {}, undefined, services);
+  try {
+    await fixture.instance.startSpecificationResearch({}); await fixture.instance.specResearchPromise;
+    const spec = fixture.instance.config.modelSpecifications['gpt-5.5'];
+    assert.equal(spec.maximumContextWindow, 1050000);
+    assert.equal(spec.contextWindow, 262500);
+    assert.equal(spec.maxTokens, 128000);
+    assert.deepEqual(fixture.instance.specResearch.results[0].diagnostics.platformExtractedFields, { maximumContextWindow: 1050000, maxTokens: 128000 });
+  } finally { await fixture.dispose(); }
+});
+
+test('a different model suffix cannot pass normalized model identity', async () => {
+  const source = { url: 'https://platform.openai.com/docs/models/gpt-5.5', snippet: 'gpt-5.5 context window 128000 tokens.' };
+  const services = researchServices(JSON.stringify({ id: 'gpt-5.5-pro', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: [source.url] }), [source]);
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-5.5'] }] }, {}, undefined, services);
+  try { await fixture.instance.startSpecificationResearch({}); await fixture.instance.specResearchPromise; assert.equal(fixture.instance.config.modelSpecifications['gpt-5.5'], undefined); } finally { await fixture.dispose(); }
+});
+
 test('failed platform-official fetch cannot turn its URL and title into evidence', async () => {
   const vendor = { url: 'https://developers.openai.com/api/docs/models/gpt-5.6-sol', title: 'GPT-5.6 Sol official page' };
   const response = JSON.stringify({ id: 'gpt-5.6-sol', maximumContextWindow: 1050000, maxTokens: 128000, reasoningEfforts: null, sources: ['https://ai.azure.com/catalog/models/gpt-5.6-sol'] });
@@ -1210,7 +1240,7 @@ test('one-click research persists official model specifications and hot-syncs DS
   } finally { await fixture.dispose(); }
 });
 
-test('research refuses another vendors official citation and leaves configuration unchanged', async () => {
+test('LLM results from another vendor source remain editable and labeled researched', async () => {
   const settingsService = settings();
   const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: 16384, reasoningEfforts: false, sources: ['https://docs.anthropic.com/en/docs/about-claude/models'] });
   const services = researchServices(response, [{ url: 'https://docs.anthropic.com/en/docs/about-claude/models', title: 'Claude', snippet: 'official Anthropic limits' }]);
@@ -1219,8 +1249,9 @@ test('research refuses another vendors official citation and leaves configuratio
     await fixture.instance.start();
     await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
-    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
-    assert.equal(fixture.instance.specResearch.skipped, 1);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 128000);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].evidenceType, 'llm-researched');
+    assert.equal(fixture.instance.specResearch.updated, 1);
   } finally { await fixture.dispose(); }
 });
 
@@ -1238,7 +1269,7 @@ test('research omits reasoning when official evidence proves limits but not reas
   } finally { await fixture.dispose(); }
 });
 
-test('research refuses official citations whose snippets do not contain the claimed limits', async () => {
+test('LLM results may fill fields even when source snippets omit exact numbers', async () => {
   const settingsService = settings();
   const response = JSON.stringify({ id: 'gpt-test', contextWindow: 1000000, maxTokens: 100000, reasoningEfforts: false, sources: ['https://platform.openai.com/docs/models/gpt-test'] });
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, researchServices(response));
@@ -1246,12 +1277,13 @@ test('research refuses official citations whose snippets do not contain the clai
     await fixture.instance.start();
     await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
-    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
-    assert.equal(fixture.instance.specResearch.skipped, 1);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 1000000);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].maxTokens, 100000);
+    assert.equal(fixture.instance.specResearch.updated, 1);
   } finally { await fixture.dispose(); }
 });
 
-test('research refuses unofficial citations and leaves configuration unchanged', async () => {
+test('LLM results from unofficial sources remain editable and labeled researched', async () => {
   const settingsService = settings();
   const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: 16384, reasoningEfforts: false, sources: ['https://random-blog.invalid/gpt-test'] });
   const services = researchServices(response, [{ url: 'https://random-blog.invalid/gpt-test', title: 'Unofficial', snippet: 'claims limits' }]);
@@ -1260,9 +1292,10 @@ test('research refuses unofficial citations and leaves configuration unchanged',
     await fixture.instance.start();
     await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
-    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
-    assert.equal(fixture.instance.specResearch.skipped, 1);
-    assert.deepEqual(settingsService.snapshot().providers['provider-hub'].models, [{ id: 'gpt-test' }]);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 128000);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].evidenceType, 'llm-researched');
+    assert.equal(fixture.instance.specResearch.updated, 1);
+    assert.deepEqual(settingsService.snapshot().providers['provider-hub'].models[0].contextWindow, 128000);
   } finally { await fixture.dispose(); }
 });
 
@@ -1390,7 +1423,7 @@ test('research keeps independently proven fields and omits invalid limits and re
     await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     const specification = fixture.instance.config.modelSpecifications['gpt-test'];
-    assert.equal(specification.contextWindow, undefined);
+    assert.equal(specification.contextWindow, 8192);
     assert.equal(specification.maxTokens, 16384);
     assert.equal(specification.reasoningEfforts, undefined);
     assert.equal(fixture.instance.specResearch.updated, 1);
