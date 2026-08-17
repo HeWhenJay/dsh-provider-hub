@@ -45,6 +45,7 @@ export function normalizeConfig(raw = {}) {
     const specification = rawSpecification && typeof rawSpecification === 'object' ? rawSpecification : {};
     if (!id) continue;
     const contextWindow = Number(specification.contextWindow);
+    const modelPricing = specification.modelPricing && typeof specification.modelPricing === 'object' ? normalizeModelPricing(specification.modelPricing) : undefined;
     const maximumContextWindow = Number(specification.maximumContextWindow);
     const contextWindowPolicy = ['source-recommended', 'quarter-maximum'].includes(specification.contextWindowPolicy) ? specification.contextWindowPolicy : undefined;
     const maxTokens = Number(specification.maxTokens);
@@ -54,6 +55,7 @@ export function normalizeConfig(raw = {}) {
       id,
       ...(asString(specification.name) ? { name: asString(specification.name) } : {}),
       ...(Number.isInteger(contextWindow) && contextWindow > 0 ? { contextWindow } : {}),
+      ...(modelPricing ? { modelPricing } : {}),
       ...(Number.isInteger(maximumContextWindow) && maximumContextWindow > 0 ? { maximumContextWindow } : {}),
       ...(contextWindowPolicy ? { contextWindowPolicy } : {}),
       ...(Number.isInteger(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
