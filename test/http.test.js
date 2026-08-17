@@ -186,7 +186,8 @@ test('non-stream relay logs provider usage, timing, cost and redacted request me
       await response.text();
     });
     const log = fixture.instance.logs[0];
-    assert.equal(log.requestId, 'request-safe-id');
+    assert.match(log.requestId, /^[0-9a-f-]{36}$/);
+    assert.notEqual(log.requestId, 'request-safe-id');
     assert.equal(log.keyName, 'Metered Key');
     assert.equal(log.inputTokens, 100);
     assert.equal(log.cachedInputTokens, 40);
@@ -202,6 +203,27 @@ test('non-stream relay logs provider usage, timing, cost and redacted request me
     assert.equal(JSON.stringify(log).includes('private prompt text'), false);
     assert.equal(JSON.stringify(log).includes('super-secret'), false);
     assert.deepEqual(fixture.instance.logSummary().costByCurrency, { USD: 0.000109 });
+  } finally { await fixture.dispose(); }
+});
+
+test('caller request ids are never persisted even when secret-shaped', async () => {
+  const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] });
+  fixture.instance.transport = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    await withServer((req, res) => fixture.instance.handleRelay(req, res), async (url) => { const response = await fetch(`${url}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-request-id': 'sk-test-secret-value' }, body: JSON.stringify({ model: 'gpt-test', messages: [{ role: 'user', content: 'hello' }] }) }); await response.text(); });
+    assert.doesNotMatch(JSON.stringify(fixture.instance.logs), /sk-test-secret-value/);
+    assert.match(fixture.instance.logs[0].requestId, /^[0-9a-f-]{36}$/);
+  } finally { await fixture.dispose(); }
+});
+
+test('stream relay joins multiline SSE data before parsing usage', async () => {
+  const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1' }, accountService: { enabled: false }, routes: [{ id: 'stream', baseURL: 'https://stream.invalid/v1', models: ['gpt-test'] }] });
+  const sse = 'data: {"choices":[{"delta":{"content":"OK"},\ndata: "finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}\n\n';
+  fixture.instance.transport = async () => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  try {
+    await withServer((req, res) => fixture.instance.handleRelay(req, res), async (url) => { const response = await fetch(`${url}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'gpt-test', messages: [{ role: 'user', content: 'hello' }], stream: true }) }); assert.equal(await response.text(), sse); });
+    assert.equal(fixture.instance.logs[0].totalTokens, 4);
+    assert.equal(fixture.instance.logs[0].finishReason, 'stop');
   } finally { await fixture.dispose(); }
 });
 
@@ -223,6 +245,27 @@ test('stream relay logs first-token latency and provider-reported cost without c
     assert.equal(log.finishReason, 'stop');
     assert.ok(log.timeToFirstTokenMs >= 0);
     assert.ok(log.totalLatencyMs >= log.timeToFirstTokenMs);
+  } finally { await fixture.dispose(); }
+});
+
+test('downstream cancellation aborts the upstream request and marks the log failed', async () => {
+  const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1' }, accountService: { enabled: false }, routes: [{ id: 'stream', baseURL: 'https://stream.invalid/v1', models: ['gpt-test'] }] });
+  let upstreamSignal;
+  fixture.instance.transport = async (_route, _model, request) => {
+    upstreamSignal = request.signal;
+    return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"O"}}]}\n\n')); } }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  };
+  try {
+    await withServer((req, res) => fixture.instance.handleRelay(req, res), async (url) => {
+      const controller = new AbortController();
+      const response = await fetch(`${url}/v1/chat/completions`, { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'gpt-test', messages: [{ role: 'user', content: 'hello' }], stream: true }) });
+      await response.body.getReader().read();
+      controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    assert.equal(upstreamSignal.aborted, true);
+    assert.equal(fixture.instance.logs[0].ok, false);
+    assert.match(fixture.instance.logs[0].error, /disconnect|cancel/i);
   } finally { await fixture.dispose(); }
 });
 
@@ -807,7 +850,7 @@ test('one-click research fetches source pages and fills specifications through t
   let searches = 0;
   let fetches = 0;
   services.web.search = async () => { searches += 1; return { sources: [source], truncated: false }; };
-  services.providerHubResearchFetch.fetch = async (item) => { fetches += 1; return { ...item, content: 'gpt-test has a 128000 context window and 16384 maximum output tokens. gpt-test reasoning effort API values are low, medium, and high.' }; };
+  services.providerHubResearchFetch.fetch = async (item) => { fetches += 1; return { ...item, pageText: 'gpt-test has a 128000 context window and 16384 maximum output tokens. gpt-test reasoning effort API values are low, medium, and high.', fetchStatus: 'fetched' }; };
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, services);
   try {
     await fixture.instance.start();
@@ -865,6 +908,55 @@ test('one-click research rejects non-public DNS results before requesting source
     await fixture.instance.specResearchPromise;
     assert.equal(requested, false);
     assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
+  } finally { await fixture.dispose(); }
+});
+
+test('failed page fetch cannot turn URL and title alone into official evidence', async () => {
+  const source = { url: 'https://platform.openai.com/docs/models/gpt-test', title: 'gpt-test 128000 context window' };
+  const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: [source.url] });
+  const services = researchServices(response, [source]);
+  delete services.providerHubResearchFetch.fetch;
+  services.providerHubResearchFetch.lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+  services.providerHubResearchFetch.request = async () => { throw new Error('network failed'); };
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, undefined, services);
+  try { await fixture.instance.startSpecificationResearch({}); await fixture.instance.specResearchPromise; assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined); } finally { await fixture.dispose(); }
+});
+
+test('verified official search citation remains usable when the page returns 403', async () => {
+  const source = { url: 'https://platform.openai.com/docs/models/gpt-test', title: 'GPT Test', snippet: 'gpt-test context window is 128000 tokens.' };
+  const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: [source.url] });
+  const services = researchServices(response, [source]);
+  delete services.providerHubResearchFetch.fetch;
+  services.providerHubResearchFetch.lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+  services.providerHubResearchFetch.request = async () => ({ status: 403, contentType: 'text/html', text: 'blocked' });
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, undefined, services);
+  try { await fixture.instance.startSpecificationResearch({}); await fixture.instance.specResearchPromise; assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 128000); } finally { await fixture.dispose(); }
+});
+
+test('blocked non-public sources cannot fall back to their search snippets', async () => {
+  const source = { url: 'https://private.example/gpt-test', title: 'GPT Test', snippet: 'gpt-test context window is 128000 tokens.' };
+  const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: [source.url] });
+  const services = researchServices(response, [source]);
+  delete services.providerHubResearchFetch.fetch;
+  services.providerHubResearchFetch.lookup = async () => [{ address: '10.0.0.1', family: 4 }];
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, undefined, services);
+  try { await fixture.instance.startSpecificationResearch({}); await fixture.instance.specResearchPromise; assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined); } finally { await fixture.dispose(); }
+});
+
+test('source hard deadline covers stalled DNS resolution', async () => {
+  const source = { url: 'https://platform.openai.com/docs/models/gpt-test', title: 'GPT Test', snippet: 'gpt-test context window is 128000 tokens.' };
+  const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: [source.url] });
+  const services = researchServices(response, [source]);
+  delete services.providerHubResearchFetch.fetch;
+  services.providerHubResearchFetch.timeoutMs = 20;
+  services.providerHubResearchFetch.lookup = async () => new Promise(() => {});
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, undefined, services);
+  try {
+    const started = Date.now();
+    await fixture.instance.startSpecificationResearch({});
+    await fixture.instance.specResearchPromise;
+    assert.ok(Date.now() - started < 1000);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 128000);
   } finally { await fixture.dispose(); }
 });
 
