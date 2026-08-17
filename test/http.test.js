@@ -950,6 +950,20 @@ test('one-click research production fetch path pins public DNS and extracts boun
   } finally { await fixture.dispose(); }
 });
 
+test('mapped and expanded IPv6 loopback addresses are rejected before source fetch', async () => {
+  for (const address of ['::ffff:7f00:1', '0:0:0:0:0:ffff:7f00:1', '::ffff:127.0.0.1']) {
+    const source = { url: 'https://platform.openai.com/docs/models/gpt-test', title: 'GPT Test', snippet: 'gpt-test context window is 128000 tokens.' };
+    const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: [source.url] });
+    const services = researchServices(response, [source]);
+    let requested = false;
+    delete services.providerHubResearchFetch.fetch;
+    services.providerHubResearchFetch.lookup = async () => [{ address, family: 6 }];
+    services.providerHubResearchFetch.request = async () => { requested = true; throw new Error('must not request'); };
+    const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, undefined, services);
+    try { await fixture.instance.startSpecificationResearch({}); await fixture.instance.specResearchPromise; assert.equal(requested, false); assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined); } finally { await fixture.dispose(); }
+  }
+});
+
 test('one-click research rejects non-public DNS results before requesting source content', async () => {
   const source = { url: 'https://platform.openai.com/docs/models/gpt-test', title: 'GPT Test', snippet: 'gpt-test official page.' };
   const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: [source.url] });

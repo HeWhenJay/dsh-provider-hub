@@ -24,7 +24,7 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 
 ## 自动模型规格
 
-渠道保存或官方账号发现新模型后，Provider Hub 会自动调用 DSH 的联网检索服务，并使用 Provider Hub 中第一个已配置 API Key 的第一个可用文本模型处理证据；生图、音频、嵌入、重排等模型会自动排除。若没有可用的 Provider Hub 文本模型，才回退到 DSH 当前默认模型。用户也可以在 **模型规格** 页选择具体 API Key 渠道与文本模型，并点击 **一键填写规格**。插件分别检索上下文、最大输出和思考档位，并把 DSH 搜索提供方返回的真实引用摘录标记为 `search-citation` 证据；对可直接访问的 HTTPS 来源还会在公网地址校验、固定 DNS 解析、禁止重定向、端到端硬截止与大小限制下读取页面正文并标记为 `page-content`。URL、标题和抓取失败状态本身不能证明任何字段，私网或不安全来源会被直接淘汰。资料来源采用“官方优先、社区共识兜底”：
+渠道保存或官方账号发现新模型后，Provider Hub 会自动调用 DSH 的联网检索服务，并使用 Provider Hub 中第一个已配置 API Key 的第一个可用文本模型处理证据；生图、音频、嵌入、重排等模型会自动排除。若没有可用的 Provider Hub 文本模型，才回退到 DSH 当前默认模型。用户也可以在 **模型规格** 页选择具体 API Key 渠道与文本模型，并点击 **一键填写规格**。插件分别检索上下文、最大输出和思考档位，并把 DSH 搜索提供方返回的真实引用摘录标记为 `search-citation` 证据；对可直接访问的 HTTPS 来源还会在公网地址校验（含压缩/展开 IPv4-mapped IPv6 的数值规范化）、固定 DNS 解析、禁止重定向、端到端硬截止与大小限制下读取页面正文并标记为 `page-content`。URL、标题和抓取失败状态本身不能证明任何字段，私网或不安全来源会被直接淘汰。资料来源采用“官方优先、社区共识兜底”：
 
 - 思考程度及其准确 API wire 值；
 - 上下文窗口；
@@ -58,16 +58,16 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.10
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.11
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.10.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.11.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.10.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.11.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.10 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.11 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 

@@ -264,13 +264,43 @@ function officialSource(url, authority) {
   } catch { return false; }
 }
 
+function nonPublicIPv4(address) {
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  return a === 10 || a === 127 || a === 0 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 0 || b === 168) || a === 198 && (b === 18 || b === 19) || a >= 224;
+}
+
+function ipv6Segments(address) {
+  const input = address.toLowerCase().split('%')[0];
+  const [leftRaw, rightRaw, extra] = input.split('::');
+  if (extra !== undefined) return undefined;
+  const parse = (raw) => raw ? raw.split(':').map((part) => {
+    if (!/^[0-9a-f]{1,4}$/.test(part)) return NaN;
+    return Number.parseInt(part, 16);
+  }) : [];
+  const left = parse(leftRaw);
+  const right = parse(rightRaw);
+  if ([...left, ...right].some(Number.isNaN)) return undefined;
+  if (!input.includes('::')) return left.length === 8 ? left : undefined;
+  const missing = 8 - left.length - right.length;
+  return missing >= 1 ? [...left, ...Array(missing).fill(0), ...right] : undefined;
+}
+
 function privateAddress(address) {
-  const normalized = address.toLowerCase().replace(/^::ffff:/, '');
-  if (isIP(normalized) === 4) {
-    const [a, b] = normalized.split('.').map(Number);
-    return a === 10 || a === 127 || a === 0 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 0 || b === 168) || a === 198 && (b === 18 || b === 19) || a >= 224;
+  const family = isIP(address);
+  if (family === 4) return nonPublicIPv4(address);
+  if (family !== 6) return true;
+  const segments = ipv6Segments(address);
+  if (!segments) return true;
+  if (segments.slice(0, 5).every((part) => part === 0) && segments[5] === 0xffff) {
+    const mapped = `${segments[6] >> 8}.${segments[6] & 0xff}.${segments[7] >> 8}.${segments[7] & 0xff}`;
+    return nonPublicIPv4(mapped);
   }
-  return normalized === '::1' || normalized === '::' || normalized.startsWith('fc') || normalized.startsWith('fd') || /^fe[89ab]/.test(normalized) || /^fe[c-f]/.test(normalized) || normalized.startsWith('ff');
+  const allZero = segments.every((part) => part === 0);
+  const loopback = segments.slice(0, 7).every((part) => part === 0) && segments[7] === 1;
+  const first = segments[0];
+  return allZero || loopback || (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xffc0) === 0xfec0 || (first & 0xff00) === 0xff00;
 }
 
 async function safeResearchURL(raw, signal, resolver = lookup) {
@@ -315,7 +345,7 @@ function fetchPinnedResearchSource(target, signal) {
       servername: parsed.hostname,
       path: `${parsed.pathname}${parsed.search}`,
       method: 'GET',
-      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.10' },
+      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.11' },
       timeout: RESEARCH_FETCH_TIMEOUT_MS,
       signal
     }, (response) => {
@@ -1106,7 +1136,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.10', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.11', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',
