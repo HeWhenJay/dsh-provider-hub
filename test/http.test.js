@@ -375,6 +375,16 @@ test('loopback host requests may omit auth while browser-origin requests still r
   } finally { await fixture.dispose(); }
 });
 
+test('local relay requires auth for a non-loopback peer or forwarded request', async () => {
+  const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1', apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [] });
+  const request = (headers = {}, remoteAddress = '10.0.0.5') => ({ headers, socket: { remoteAddress } });
+  try {
+    assert.equal(await fixture.instance.clientAuthorized(request()), false);
+    assert.equal(await fixture.instance.clientAuthorized(request({ forwarded: 'for=10.0.0.5' }, '127.0.0.1')), false);
+    assert.equal(await fixture.instance.clientAuthorized(request({}, '127.0.0.1')), true);
+  } finally { await fixture.dispose(); }
+});
+
 test('browser-origin requests cannot use an unkeyed local service', async () => {
   const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1', apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [] });
   try {
@@ -580,6 +590,91 @@ function researchServices(responseText, sources = [{ url: 'https://platform.open
   };
 }
 
+test('research selection uses the first configured API key text model and excludes image models', async () => {
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [
+    { id: 'first', keyName: 'First Key', baseURL: 'https://first.invalid/v1', apiKeyEnv: 'FIRST_KEY', models: ['gpt-image-2', 'gpt-text'] },
+    { id: 'second', keyName: 'Second Key', baseURL: 'https://second.invalid/v1', apiKeyEnv: 'SECOND_KEY', models: ['gpt-other'] }
+  ] }, { FIRST_KEY: 'secret-a', SECOND_KEY: 'secret-b' }, undefined, researchServices('{}'));
+  try {
+    const state = await fixture.instance.specificationResearchState();
+    assert.deepEqual(state.selections.map((item) => [item.routeId, item.model]), [['first', 'gpt-text'], ['second', 'gpt-other']]);
+    assert.equal(state.selection.routeId, 'first');
+    assert.equal(state.selection.model, 'gpt-text');
+  } finally { await fixture.dispose(); }
+});
+
+test('two independent community sources with matching values can provide a specification field', async () => {
+  const sources = [
+    { url: 'https://blog-one.example/models/gpt-test', title: 'Model guide gpt-test', snippet: 'gpt-test has a 128000 context window.' },
+    { url: 'https://catalog-two.example/gpt-test', title: 'Community catalog gpt-test', snippet: 'Context window: 128000 tokens for gpt-test.' }
+  ];
+  const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: sources.map((source) => source.url) });
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, undefined, researchServices(response, sources));
+  try {
+    await fixture.instance.startSpecificationResearch({});
+    await fixture.instance.specResearchPromise;
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].contextWindow, 128000);
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].evidenceType, 'community-consensus');
+    assert.deepEqual(fixture.instance.config.modelSpecifications['gpt-test'].fieldEvidence.contextWindow.sources, sources.map((source) => source.url));
+  } finally { await fixture.dispose(); }
+});
+
+test('one community source alone cannot establish a model specification field', async () => {
+  const sources = [{ url: 'https://single-blog.example/gpt-test', title: 'gpt-test model guide', snippet: 'gpt-test context window is 128000 tokens.' }];
+  const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: sources.map((source) => source.url) });
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, undefined, researchServices(response, sources));
+  try {
+    await fixture.instance.startSpecificationResearch({});
+    await fixture.instance.specResearchPromise;
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
+    assert.equal(fixture.instance.specResearch.skipped, 1);
+  } finally { await fixture.dispose(); }
+});
+
+test('community subdomains of one registrable domain do not count as independent sources', async () => {
+  const sources = [
+    { url: 'https://docs.same.example/gpt-test', title: 'gpt-test docs', snippet: 'gpt-test context window is 128000 tokens.' },
+    { url: 'https://blog.same.example/gpt-test', title: 'gpt-test blog', snippet: 'gpt-test context window is 128000 tokens.' }
+  ];
+  const response = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: sources.map((source) => source.url) });
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, undefined, researchServices(response, sources));
+  try {
+    await fixture.instance.startSpecificationResearch({});
+    await fixture.instance.specResearchPromise;
+    assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
+  } finally { await fixture.dispose(); }
+});
+
+test('field provenance survives configuration normalization', async () => {
+  const raw = { modelSpecifications: { 'gpt-test': { id: 'gpt-test', contextWindow: 128000, evidenceType: 'community-consensus', fieldEvidence: { contextWindow: { type: 'community-consensus', sources: ['https://blog-one.example/gpt-test', 'https://catalog-two.example/gpt-test'] } }, sources: ['https://blog-one.example/gpt-test'] } } };
+  const normalized = normalizeConfig(raw);
+  assert.equal(normalized.modelSpecifications['gpt-test'].evidenceType, 'community-consensus');
+  assert.deepEqual(normalized.modelSpecifications['gpt-test'].fieldEvidence.contextWindow.sources, raw.modelSpecifications['gpt-test'].fieldEvidence.contextWindow.sources);
+});
+
+test('explicit research route and model selection is never silently replaced', async () => {
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'first', baseURL: 'https://first.invalid/v1', apiKeyEnv: 'FIRST_KEY', models: ['gpt-test'] }] }, { FIRST_KEY: 'secret' }, undefined, researchServices('{}'));
+  try {
+    await assert.rejects(() => fixture.instance.startSpecificationResearch({ routeId: 'missing', model: 'gpt-test' }), /unavailable/);
+    await assert.rejects(() => fixture.instance.startSpecificationResearch({ routeId: 'first', model: 'other-model' }), /unavailable/);
+  } finally { await fixture.dispose(); }
+});
+
+test('selected Responses API research uses the selected route directly', async () => {
+  const sources = [{ url: 'https://platform.openai.com/docs/models/gpt-test', title: 'gpt-test', snippet: 'gpt-test context window 128000.' }];
+  const responseText = JSON.stringify({ id: 'gpt-test', contextWindow: 128000, maxTokens: null, reasoningEfforts: null, sources: [sources[0].url] });
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'responses', baseURL: 'https://responses.invalid/v1', api: 'openai-responses', apiKeyEnv: 'RESPONSES_KEY', models: ['gpt-test'] }] }, { RESPONSES_KEY: 'secret' }, undefined, researchServices(responseText, sources));
+  const calls = [];
+  fixture.instance.transport = async (route, model, request) => { calls.push({ route: route.id, model, endpoint: request.endpoint, body: request.body }); return new Response(JSON.stringify({ output_text: responseText }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+  try {
+    await fixture.instance.startSpecificationResearch({ routeId: 'responses', model: 'gpt-test' });
+    await fixture.instance.specResearchPromise;
+    assert.deepEqual(calls.map((call) => [call.route, call.model, call.endpoint]), [['responses', 'gpt-test', 'responses']]);
+    assert.equal(calls[0].body.max_output_tokens, 1600);
+    assert.equal(typeof calls[0].body.input, 'string');
+  } finally { await fixture.dispose(); }
+});
+
 test('saving a route automatically starts missing specification enrichment once', async () => {
   const settingsService = settings();
   let searches = 0;
@@ -611,7 +706,7 @@ test('manual retry runs again after automatic enrichment lacks evidence', async 
     await fixture.instance.saveRoute({ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] });
     await fixture.instance.specResearchPromise;
     assert.equal(fixture.instance.specResearch.skipped, 1);
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     assert.equal(searches, 2);
   } finally { await fixture.dispose(); }
@@ -623,7 +718,7 @@ test('one-click research persists official model specifications and hot-syncs DS
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, researchServices(response));
   try {
     await fixture.instance.start();
-    const accepted = fixture.instance.startSpecificationResearch({});
+    const accepted = await fixture.instance.startSpecificationResearch({});
     assert.equal(accepted.accepted, true);
     await fixture.instance.specResearchPromise;
     const specification = fixture.instance.config.modelSpecifications['gpt-test'];
@@ -643,7 +738,7 @@ test('research refuses another vendors official citation and leaves configuratio
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, services);
   try {
     await fixture.instance.start();
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
     assert.equal(fixture.instance.specResearch.skipped, 1);
@@ -656,7 +751,7 @@ test('research omits reasoning when official evidence proves limits but not reas
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, researchServices(response, [{ url: 'https://platform.openai.com/docs/models/gpt-test', title: 'GPT Test', snippet: '128000 context; 16384 maximum output.' }]));
   try {
     await fixture.instance.start();
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     const specification = fixture.instance.config.modelSpecifications['gpt-test'];
     assert.equal('reasoningEfforts' in specification, false);
@@ -670,7 +765,7 @@ test('research refuses official citations whose snippets do not contain the clai
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, researchServices(response));
   try {
     await fixture.instance.start();
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
     assert.equal(fixture.instance.specResearch.skipped, 1);
@@ -684,7 +779,7 @@ test('research refuses unofficial citations and leaves configuration unchanged',
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, services);
   try {
     await fixture.instance.start();
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
     assert.equal(fixture.instance.specResearch.skipped, 1);
@@ -700,7 +795,7 @@ test('research refuses to start when every model vendor is unidentifiable', asyn
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['my-best-model'] }] }, {}, settingsService, services);
   try {
     await fixture.instance.start();
-    assert.throws(() => fixture.instance.startSpecificationResearch({}), /safely identifiable vendor/);
+    await assert.rejects(() => fixture.instance.startSpecificationResearch({}), /safely identifiable vendor/);
     assert.equal(searched, false);
     assert.equal(fixture.instance.config.modelSpecifications['my-best-model'], undefined);
   } finally { await fixture.dispose(); }
@@ -727,7 +822,7 @@ test('research does not persist a model removed while the model call is in fligh
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, services);
   try {
     await fixture.instance.start();
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     while (!release) await new Promise((resolve) => setImmediate(resolve));
     fixture.instance.config.routes[0].models = [];
     fixture.instance.refreshRouter();
@@ -748,7 +843,7 @@ test('disposing Provider Hub aborts and drains active model research', async () 
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, services);
   try {
     await fixture.instance.start();
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     await fixture.instance.dispose();
     assert.equal(aborted, true);
     assert.equal(fixture.instance.specResearchPromise, undefined);
@@ -786,7 +881,7 @@ test('thinking format is accepted only when it matches the identified model vend
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, researchServices(response));
   try {
     await fixture.instance.start();
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     assert.equal(fixture.instance.config.modelSpecifications['gpt-test'].compat.thinkingFormat, 'openai');
   } finally { await fixture.dispose(); }
@@ -798,7 +893,7 @@ test('mismatched thinking format is omitted without losing researched limits and
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, researchServices(response));
   try {
     await fixture.instance.start();
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     const specification = fixture.instance.config.modelSpecifications['gpt-test'];
     assert.equal(specification.compat, undefined);
@@ -813,7 +908,7 @@ test('research keeps independently proven fields and omits invalid limits and re
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, researchServices(response));
   try {
     await fixture.instance.start();
-    fixture.instance.startSpecificationResearch({});
+    await fixture.instance.startSpecificationResearch({});
     await fixture.instance.specResearchPromise;
     const specification = fixture.instance.config.modelSpecifications['gpt-test'];
     assert.equal(specification.contextWindow, undefined);

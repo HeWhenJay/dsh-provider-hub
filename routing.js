@@ -34,6 +34,8 @@ export function normalizeConfig(raw = {}) {
       ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
       ...(compat ? { compat } : {}),
       sources: Array.isArray(specification.sources) ? [...new Set(specification.sources.map((source) => asString(source)).filter((source) => /^https:\/\//i.test(source)).slice(0, 6))] : [],
+      ...(specification.fieldEvidence && typeof specification.fieldEvidence === 'object' ? { fieldEvidence: structuredClone(specification.fieldEvidence) } : {}),
+      ...(specification.evidenceType === 'community-consensus' || specification.evidenceType === 'official' ? { evidenceType: specification.evidenceType } : {}),
       ...(asString(specification.researchedAt) ? { researchedAt: asString(specification.researchedAt) } : {})
     };
   }

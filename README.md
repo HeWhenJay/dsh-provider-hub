@@ -24,14 +24,14 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 
 ## 自动模型规格
 
-渠道保存或官方账号发现新模型后，Provider Hub 会自动调用 DSH 的联网检索和默认模型，从厂商官方来源逐字段补全模型配置：
+渠道保存或官方账号发现新模型后，Provider Hub 会自动调用 DSH 的联网检索服务，并使用 Provider Hub 中第一个已配置 API Key 的第一个可用文本模型处理证据；生图、音频、嵌入、重排等模型会自动排除。若没有可用的 Provider Hub 文本模型，才回退到 DSH 当前默认模型。用户也可以在 **模型规格** 页选择具体 API Key 渠道与文本模型。资料来源采用“官方优先、社区共识兜底”：
 
 - 思考程度及其准确 API wire 值；
 - 上下文窗口；
 - 最大输出窗口；
 - 兼容的思考格式与官方证据来源。
 
-每个字段独立验证：官方资料查到什么就填写什么，没查到的字段保持空白，不用模型记忆猜测。自动任务使用 DSH 的当前 `agent-default-model`，**模型规格** 页会明确显示本次研究调用的 `provider / model`。配置页会逐模型展示已填写字段、待补全字段、官方来源和失败原因；自动任务缺少证据或发生错误时，才显示手动 **重新补全规格** 按钮。验证通过的内容会热同步到 DSH 自动管理的 `provider-hub` 模型供应商，无需为单次补全重启 Web。
+每个字段独立验证：厂商官方来源证明该字段即可写入；没有官方资料时，至少两个不同注册域名的独立社区来源必须针对同一模型、同一字段给出一致值，才作为“社区共识”写入。同一站点的多个子域、单篇博客、只出现相同数字但未明确关联模型/字段的内容，以及相互冲突的资料都不会采用；没形成共识的字段保持空白。**模型规格** 页会明确显示本次使用的 API Key 名称、渠道与文本模型，并按字段标注“官方证据”或“社区共识”。配置页会逐模型展示已填写字段、待补全字段、实际支撑来源和失败原因；自动任务缺少证据或发生错误时，才显示手动 **重新补全规格** 按钮。验证通过的内容会热同步到 DSH 自动管理的 `provider-hub` 模型供应商，无需为单次补全重启 Web。
 
 ![逐模型查看完整、部分补全、缺少证据与失败状态](docs/images/provider-hub-model-specs.png)
 
@@ -56,16 +56,16 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.4
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.5
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.4.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.5.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.4.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.5.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.4 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.5 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 
