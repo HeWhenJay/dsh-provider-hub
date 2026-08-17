@@ -34,6 +34,15 @@
       "models": ["gpt-5.4"],
       "modelAllowlist": ["gpt-5.4"],
       "modelAliases": {},
+      "modelPricing": {
+        "gpt-5.4": {
+          "inputPerMillion": 1.25,
+          "cachedInputPerMillion": 0.125,
+          "outputPerMillion": 10,
+          "reasoningPerMillion": 10,
+          "currency": "USD"
+        }
+      },
       "headers": {}
     },
     {
@@ -50,6 +59,7 @@
       "modelAliases": {
         "gpt-5.4": "vendor-model-name"
       },
+      "modelPricing": {},
       "headers": {}
     }
   ]

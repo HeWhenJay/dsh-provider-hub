@@ -67,6 +67,7 @@ export function normalizeConfig(raw = {}) {
       modelAllowlist,
       modelMetadata,
       modelAliases: aliases,
+      modelPricing: value.modelPricing && typeof value.modelPricing === 'object' ? structuredClone(value.modelPricing) : {},
       headers: value.headers && typeof value.headers === 'object' ? { ...value.headers } : {}
     };
   }).filter((route) => route.id && route.baseURL);
@@ -149,7 +150,9 @@ export class ChannelRouter {
       throw error;
     }
     let lastError;
-    for (const route of candidates) {
+    for (let index = 0; index < candidates.length; index += 1) {
+      const route = candidates[index];
+      request.attempt = index + 1;
       const startedAt = Date.now();
       try {
         const result = await operation(route, model, request);
@@ -160,12 +163,12 @@ export class ChannelRouter {
           throw error;
         }
         this.markSuccess(route, sessionId);
-        this.onAttempt?.({ route, model, ok: true, status: result instanceof Response ? result.status : 200, latencyMs: Date.now() - startedAt });
-        return { result, route };
+        const attempt = this.onAttempt?.({ route, model, request, ok: true, status: result instanceof Response ? result.status : 200, latencyMs: Date.now() - startedAt });
+        return { result, route, attempt };
       } catch (error) {
         lastError = error;
         this.markFailure(route, error);
-        this.onAttempt?.({ route, model, ok: false, status: Number(error?.status) || 0, latencyMs: Date.now() - startedAt, error });
+        this.onAttempt?.({ route, model, request, ok: false, status: Number(error?.status) || 0, latencyMs: Date.now() - startedAt, error });
       }
     }
     const error = new Error(`all configured channels failed for model "${model}"`);

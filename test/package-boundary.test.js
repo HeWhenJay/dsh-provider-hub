@@ -40,7 +40,7 @@ test('web client contains only the built-in account service contract', () => {
   assert.match(source, /generatedCredentialRef/);
   assert.match(source, /setRouteId/);
   assert.match(source, /DSH 供应商已同步/);
-  assert.match(source, /重新补全规格/);
+  assert.match(source, /一键填写规格/);
   assert.match(source, /模型规格/);
   assert.match(source, /ModelSpecifications/);
   assert.match(source, /container-name:providerHub/);
@@ -53,6 +53,10 @@ test('web client contains only the built-in account service contract', () => {
   assert.match(source, /研究调用/);
   assert.match(source, /研究 API Key 与文本模型/);
   assert.match(source, /社区共识/);
+  assert.match(source, /请求日志与用量/);
+  assert.match(source, /模型价格 JSON/);
+  assert.match(source, /首 Token/);
+  assert.match(source, /渠道模型单价估算/);
   assert.match(source, /\/models\/research/);
   assert.match(source, /API Key 名称|modelAllowlistText/);
   assert.doesNotMatch(source, /IconSettingsOutline/);
