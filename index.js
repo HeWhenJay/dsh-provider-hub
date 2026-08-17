@@ -603,7 +603,7 @@ class RelayRuntime {
       api: 'openai-completions',
       baseURL: this.relayBaseURL(),
       models,
-      ...(keyConfigured && this.config.listen.host === '0.0.0.0' ? { apiKeyEnv: this.config.listen.apiKeyEnv } : {})
+      ...(keyConfigured ? { apiKeyEnv: this.config.listen.apiKeyEnv } : {})
     };
     const shouldExist = managed.enabled && this.config.listen.enabled && Boolean(this.server?.listening) && models.length > 0;
     const ownsExisting = managed.owned && managed.lastProfile && sameJson(userExisting, managed.lastProfile);
@@ -856,7 +856,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.5', ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.6', ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',

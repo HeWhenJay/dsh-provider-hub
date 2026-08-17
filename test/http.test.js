@@ -443,6 +443,16 @@ test('concurrent service saves serialize lifecycle and leave exactly one tracked
   } finally { await fixture.dispose(); }
 });
 
+test('managed DSH provider references the generated relay credential in loopback mode', async () => {
+  const settingsService = settings();
+  const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, { CLIENT_KEY: 'ph-client-secret' }, settingsService);
+  try {
+    await fixture.instance.start();
+    assert.equal(settingsService.snapshot().providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
+    assert.equal(fixture.instance.managedProviderState.keyConfigured, true);
+  } finally { await fixture.dispose(); }
+});
+
 test('managed DSH provider uses the actual fallback port and preserves unrelated providers', async () => {
   const occupied = createServer((_req, res) => res.end('keep-running'));
   occupied.listen(0, '127.0.0.1');
@@ -456,7 +466,7 @@ test('managed DSH provider uses the actual fallback port and preserves unrelated
     assert.notEqual(fixture.instance.actualPort, preferredPort);
     assert.equal(providers['provider-hub'].baseURL, `http://127.0.0.1:${fixture.instance.actualPort}/v1`);
     assert.equal(providers['provider-hub'].api, 'openai-completions');
-    assert.equal('apiKeyEnv' in providers['provider-hub'], false);
+    assert.equal(providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
     assert.deepEqual(providers['provider-hub'].models.map((model) => model.id), ['gpt-a', 'gpt-shared', 'gpt-b']);
     assert.equal(providers['local-cockpit'].models[0].id, 'gpt-existing');
     assert.equal(providers.fastapi.models[0].id, 'gpt-fast');
@@ -469,14 +479,14 @@ test('managed DSH provider uses the actual fallback port and preserves unrelated
   }
 });
 
-test('managed DSH provider omits the credential ref for loopback but includes it for LAN', async () => {
+test('managed DSH provider includes the credential ref for loopback and LAN', async () => {
   const loopbackSettings = settings();
   const loopback = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, { CLIENT_KEY: 'ph-client-secret' }, loopbackSettings);
   const lanSettings = settings();
   const lan = runtime({ listen: { enabled: true, host: '0.0.0.0', port: 0, apiKeyEnv: 'CLIENT_KEY' }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-a'] }] }, { CLIENT_KEY: 'ph-client-secret' }, lanSettings);
   try {
     await loopback.instance.start();
-    assert.equal('apiKeyEnv' in loopbackSettings.snapshot().providers['provider-hub'], false);
+    assert.equal(loopbackSettings.snapshot().providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
     await lan.instance.start();
     assert.equal(lanSettings.snapshot().providers['provider-hub'].apiKeyEnv, 'CLIENT_KEY');
   } finally { await loopback.dispose(); await lan.dispose(); }

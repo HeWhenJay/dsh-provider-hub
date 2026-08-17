@@ -56,16 +56,16 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.5
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.6
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.5.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.6.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.5.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.6.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.5 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.6 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 
@@ -151,7 +151,7 @@ Provider Hub 默认在 `127.0.0.1:19529` 提供统一接口。服务成功启动
 - Base URL 使用页面显示的实际地址，包括端口冲突后的自动避让端口；
 - API 固定为 OpenAI Chat Completions；
 - 模型从 Provider Hub 的聚合 `/v1/models` 目录读取、去重；每个 Key 非空白名单之外的模型不会进入聚合目录，并尽可能保留名称、上下文窗口和最大输出长度；
-- 首次启动会自动生成客户端访问密钥；仅本机 `127.0.0.1` 模式下，DSH Host 通过无浏览器 Origin 的 loopback 请求直接访问，不在托管供应商中声明 `apiKeyEnv`，避免凭据同步时序阻断模型调用；LAN 模式仍写入并强制 `apiKeyEnv`；
+- 首次启动会自动生成客户端访问密钥；只要凭据已经配置，自动管理的供应商在本机与 LAN 模式下都会声明对应 `apiKeyEnv`，使 `llm-pi-ai` 能在请求前解析 Relay Key。Relay 的 loopback 兼容规则仍允许受控的本机无 Origin 请求，但 DSH 正常模型调用会携带该 Key；
 - 渠道、官方账号或 sidecar 模型变化后会自动重新同步。
 
 插件只管理 `provider-hub` 这一条供应商，不修改其他供应商，也不会切换 `agent-default-model`。如果用户已经手工创建了同名条目，插件会报告冲突并保持原配置不变。Relay 停止、禁用或聚合模型为空时，插件只删除经自身确认创建的条目；模型为空时状态显示为等待，不写入 DSH 无法使用的空模型供应商。
