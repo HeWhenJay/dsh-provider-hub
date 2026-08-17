@@ -6,7 +6,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { ChannelRouter, normalizeConfig } from './routing.js';
+import { ChannelRouter, normalizeConfig, normalizeModelPricing } from './routing.js';
 import { ProviderSidecar, SIDECAR_CLIENT_KEY_ENV } from './sidecar.js';
 
 const MANAGEMENT_PREFIX = '/api/provider-hub';
@@ -315,7 +315,7 @@ function fetchPinnedResearchSource(target, signal) {
       servername: parsed.hostname,
       path: `${parsed.pathname}${parsed.search}`,
       method: 'GET',
-      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.9' },
+      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.10' },
       timeout: RESEARCH_FETCH_TIMEOUT_MS,
       signal
     }, (response) => {
@@ -499,19 +499,7 @@ function positiveNumber(value) {
 }
 
 function normalizedPricing(value) {
-  const pricing = value && typeof value === 'object' ? value : {};
-  const inputPerMillion = positiveNumber(pricing.inputPerMillion ?? pricing.input);
-  const outputPerMillion = positiveNumber(pricing.outputPerMillion ?? pricing.output);
-  const cachedInputPerMillion = positiveNumber(pricing.cachedInputPerMillion ?? pricing.cachedInput);
-  const reasoningPerMillion = positiveNumber(pricing.reasoningPerMillion ?? pricing.reasoning);
-  const currency = asString(pricing.currency, 'USD').toUpperCase();
-  return {
-    ...(inputPerMillion !== undefined ? { inputPerMillion } : {}),
-    ...(outputPerMillion !== undefined ? { outputPerMillion } : {}),
-    ...(cachedInputPerMillion !== undefined ? { cachedInputPerMillion } : {}),
-    ...(reasoningPerMillion !== undefined ? { reasoningPerMillion } : {}),
-    currency: /^[A-Z]{3}$/.test(currency) ? currency : 'USD'
-  };
+  return normalizeModelPricing(value);
 }
 
 function estimateTokens(text) {
@@ -554,11 +542,15 @@ function requestAudit(body, endpoint) {
 function usageFromPayload(payload) {
   const usage = payload?.usage ?? payload?.response?.usage;
   if (!usage || typeof usage !== 'object') return undefined;
-  const inputTokens = positiveNumber(usage.prompt_tokens ?? usage.input_tokens);
+  const openAiInputTokens = positiveNumber(usage.prompt_tokens ?? usage.input_tokens);
+  const additiveCachedInputTokens = positiveNumber(usage.cache_read_input_tokens);
+  const inputTokens = openAiInputTokens !== undefined || additiveCachedInputTokens !== undefined ? (openAiInputTokens ?? 0) + (additiveCachedInputTokens ?? 0) : undefined;
   const outputTokens = positiveNumber(usage.completion_tokens ?? usage.output_tokens);
-  const cachedInputTokens = positiveNumber(usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? usage.cache_read_input_tokens);
+  const cachedInputTokens = positiveNumber(usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens) ?? additiveCachedInputTokens;
   const reasoningTokens = positiveNumber(usage.completion_tokens_details?.reasoning_tokens ?? usage.output_tokens_details?.reasoning_tokens);
-  const totalTokens = positiveNumber(usage.total_tokens) ?? (inputTokens !== undefined || outputTokens !== undefined ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined);
+  const reportedTotalTokens = positiveNumber(usage.total_tokens);
+  const calculatedTotalTokens = inputTokens !== undefined || outputTokens !== undefined ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined;
+  const totalTokens = additiveCachedInputTokens !== undefined && calculatedTotalTokens !== undefined ? Math.max(reportedTotalTokens ?? 0, calculatedTotalTokens) : reportedTotalTokens ?? calculatedTotalTokens;
   const reportedCost = positiveNumber(payload?.cost ?? payload?.total_cost ?? payload?.response_cost ?? usage.cost ?? usage.total_cost);
   return {
     ...(inputTokens !== undefined ? { inputTokens } : {}),
@@ -592,13 +584,18 @@ function payloadFinishReason(payload) {
 
 function estimatedCost(route, model, usage) {
   const pricing = normalizedPricing(route.modelPricing?.[model] ?? route.modelMetadata?.[model]?.pricing);
-  const hasPrice = ['inputPerMillion', 'outputPerMillion', 'cachedInputPerMillion', 'reasoningPerMillion'].some((field) => pricing[field] !== undefined);
-  if (!hasPrice) return undefined;
   const cached = usage.cachedInputTokens ?? 0;
   const billableInput = Math.max(0, (usage.inputTokens ?? 0) - cached);
   const reasoning = usage.reasoningTokens ?? 0;
   const ordinaryOutput = Math.max(0, (usage.outputTokens ?? 0) - reasoning);
-  const amount = (billableInput * (pricing.inputPerMillion ?? 0) + cached * (pricing.cachedInputPerMillion ?? pricing.inputPerMillion ?? 0) + ordinaryOutput * (pricing.outputPerMillion ?? 0) + reasoning * (pricing.reasoningPerMillion ?? pricing.outputPerMillion ?? 0)) / 1_000_000;
+  const missing = [
+    billableInput > 0 && pricing.inputPerMillion === undefined,
+    cached > 0 && pricing.cachedInputPerMillion === undefined,
+    ordinaryOutput > 0 && pricing.outputPerMillion === undefined,
+    reasoning > 0 && pricing.reasoningPerMillion === undefined
+  ].some(Boolean);
+  if (missing || billableInput === 0 && cached === 0 && ordinaryOutput === 0 && reasoning === 0) return undefined;
+  const amount = (billableInput * (pricing.inputPerMillion ?? 0) + cached * (pricing.cachedInputPerMillion ?? 0) + ordinaryOutput * (pricing.outputPerMillion ?? 0) + reasoning * (pricing.reasoningPerMillion ?? 0)) / 1_000_000;
   return { amount, currency: pricing.currency, source: 'route-pricing' };
 }
 
@@ -1109,7 +1106,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.9', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.10', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',

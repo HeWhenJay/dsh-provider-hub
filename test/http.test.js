@@ -260,6 +260,29 @@ test('partial usage frames preserve previously captured token fields and null co
   } finally { await fixture.dispose(); }
 });
 
+test('partial pricing leaves cost unavailable when an actually used category has no rate', async () => {
+  const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1' }, accountService: { enabled: false }, routes: [{ id: 'partial', baseURL: 'https://partial.invalid/v1', models: ['gpt-test'], modelPricing: { 'gpt-test': { inputPerMillion: 1, currency: 'USD' } } }] });
+  fixture.instance.transport = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    await withServer((req, res) => fixture.instance.handleRelay(req, res), async (url) => { const response = await fetch(`${url}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'gpt-test', messages: [{ role: 'user', content: 'hello' }] }) }); await response.text(); });
+    assert.equal(fixture.instance.logs[0].cost, undefined);
+    assert.equal(fixture.instance.logs[0].costSource, undefined);
+  } finally { await fixture.dispose(); }
+});
+
+test('Anthropic cache read tokens are additive to input tokens', async () => {
+  const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1' }, accountService: { enabled: false }, routes: [{ id: 'anthropic', baseURL: 'https://anthropic.invalid/v1', models: ['gpt-test'], modelPricing: { 'gpt-test': { inputPerMillion: 1, cachedInputPerMillion: 0.1, outputPerMillion: 2, currency: 'USD' } } }] });
+  fixture.instance.transport = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }], usage: { input_tokens: 10, cache_read_input_tokens: 40, output_tokens: 2 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    await withServer((req, res) => fixture.instance.handleRelay(req, res), async (url) => { const response = await fetch(`${url}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'gpt-test', messages: [{ role: 'user', content: 'hello' }] }) }); await response.text(); });
+    const log = fixture.instance.logs[0];
+    assert.equal(log.inputTokens, 50);
+    assert.equal(log.cachedInputTokens, 40);
+    assert.equal(log.totalTokens, 52);
+    assert.equal(log.cost, 0.000018);
+  } finally { await fixture.dispose(); }
+});
+
 test('stream relay logs first-token latency and provider-reported cost without changing SSE bytes', async () => {
   const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1' }, accountService: { enabled: false }, routes: [{ id: 'stream', keyName: 'Stream Key', baseURL: 'https://stream.invalid/v1', models: ['gpt-test'] }] });
   const sse = 'data: {"choices":[{"delta":{"content":"O"},"finish_reason":null}]}\n\ndata: {"choices":[{"delta":{"content":"K"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12},"cost":0.0007}\n\ndata: [DONE]\n\n';

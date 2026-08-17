@@ -10,6 +10,28 @@ function asPositiveInt(value, fallback) {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
+function nonNegativeNumber(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+export function normalizeModelPricing(value) {
+  const pricing = value && typeof value === 'object' ? value : {};
+  const inputPerMillion = nonNegativeNumber(pricing.inputPerMillion ?? pricing.input);
+  const outputPerMillion = nonNegativeNumber(pricing.outputPerMillion ?? pricing.output);
+  const cachedInputPerMillion = nonNegativeNumber(pricing.cachedInputPerMillion ?? pricing.cachedInput);
+  const reasoningPerMillion = nonNegativeNumber(pricing.reasoningPerMillion ?? pricing.reasoning);
+  const currency = asString(pricing.currency, 'USD').toUpperCase();
+  return {
+    ...(inputPerMillion !== undefined ? { inputPerMillion } : {}),
+    ...(outputPerMillion !== undefined ? { outputPerMillion } : {}),
+    ...(cachedInputPerMillion !== undefined ? { cachedInputPerMillion } : {}),
+    ...(reasoningPerMillion !== undefined ? { reasoningPerMillion } : {}),
+    currency: /^[A-Z]{3}$/.test(currency) ? currency : 'USD'
+  };
+}
+
 export function normalizeConfig(raw = {}) {
   const input = raw && typeof raw === 'object' ? raw : {};
   const listen = input.listen && typeof input.listen === 'object' ? input.listen : {};
@@ -67,7 +89,7 @@ export function normalizeConfig(raw = {}) {
       modelAllowlist,
       modelMetadata,
       modelAliases: aliases,
-      modelPricing: value.modelPricing && typeof value.modelPricing === 'object' ? structuredClone(value.modelPricing) : {},
+      modelPricing: Object.fromEntries(Object.entries(value.modelPricing && typeof value.modelPricing === 'object' ? value.modelPricing : {}).map(([model, pricing]) => [model, normalizeModelPricing(pricing)])),
       headers: value.headers && typeof value.headers === 'object' ? { ...value.headers } : {}
     };
   }).filter((route) => route.id && route.baseURL);
@@ -161,6 +183,7 @@ export class ChannelRouter {
           const error = new Error(`${route.displayName} returned HTTP ${result.status}`);
           error.status = result.status;
           error.routeId = route.id;
+          await result.body?.cancel(error).catch(() => {});
           throw error;
         }
         this.markSuccess(route, sessionId);

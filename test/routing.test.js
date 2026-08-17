@@ -21,6 +21,22 @@ test('normal channels are tried before backup channels', async () => {
   assert.deepEqual(calls, ['cheap', 'backup']);
 });
 
+test('non-2xx response bodies are cancelled before failover', async () => {
+  let cancelled = false;
+  const router = new ChannelRouter(normalizeConfig({ routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'], priority: 2 }, { id: 'b', baseURL: 'https://b.invalid/v1', models: ['gpt-test'], priority: 1 }] }), async (channel) => {
+    if (channel.id === 'a') return new Response(new ReadableStream({ cancel() { cancelled = true; } }), { status: 503 });
+    return new Response('{}', { status: 200 });
+  });
+  const result = await router.execute('gpt-test', {}, undefined);
+  assert.equal(result.route.id, 'b');
+  assert.equal(cancelled, true);
+});
+
+test('startup pricing normalization matches management saves', () => {
+  const route = normalizeConfig({ routes: [{ id: 'priced', baseURL: 'https://priced.invalid/v1', modelPricing: { 'gpt-test': { inputPerMillion: '1.25', outputPerMillion: -3, cachedInputPerMillion: '0.125', currency: 'usd' } } }] }).routes[0];
+  assert.deepEqual(route.modelPricing['gpt-test'], { inputPerMillion: 1.25, cachedInputPerMillion: 0.125, currency: 'USD' });
+});
+
 test('one unhealthy route cools down and the next request uses the peer', async () => {
   const calls = [];
   const router = new ChannelRouter(normalizeConfig({

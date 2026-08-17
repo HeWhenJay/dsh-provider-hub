@@ -46,7 +46,7 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 - 自动接入 DSH Models：服务启动后按实际监听端口创建 `provider-hub` 供应商，并同步每个 Key 白名单过滤后的聚合模型目录。
 - 路由控制：优先级、普通/保底渠道、瞬时故障冷却、最大尝试次数、会话粘性和模型别名。
 - 安全凭据：首次启动自动生成以 `Provider-Hub-` 开头的 Relay 客户端 API Key，一次性展示给用户复制；实际密钥写入 DSH credentials，JSON 配置仅保存凭据引用，用户可在服务设置中替换。
-- 脱敏日志与计费：Provider Hub 为每次请求生成自己的 UUID（不持久化调用方 `X-Request-ID`），逐次尝试展示请求 ID、Key 名称、模型与上游模型、协议、重试、HTTP 状态、finish reason、输入/缓存/输出/推理/总 Token、首 Token 与完整耗时。客户端断开会取消上游请求并标记失败，Relay 遵守写入背压；合法的多行 SSE 事件也能正确解析 usage。Token 优先采用供应商 usage，部分 usage 帧只覆盖实际存在的字段，不会清除早先记录；缺失时明确标记本地估算；费用优先采用供应商报告，否则按渠道配置的每百万 Token 单价估算，未配置价格时不虚构金额。日志不记录提示词、完整响应、密钥、凭据引用或完整上游 URL。
+- 脱敏日志与计费：Provider Hub 为每次请求生成自己的 UUID（不持久化调用方 `X-Request-ID`），逐次尝试展示请求 ID、Key 名称、模型与上游模型、协议、重试、HTTP 状态、finish reason、输入/缓存/输出/推理/总 Token、首 Token 与完整耗时。客户端断开会取消上游请求并标记失败，Relay 遵守写入背压；合法的多行 SSE 事件也能正确解析 usage。Token 优先采用供应商 usage，部分 usage 帧只覆盖实际存在的字段，不会清除早先记录；缺失时明确标记本地估算；费用优先采用供应商报告，否则按渠道配置的每百万 Token 单价估算；只有本次实际使用的普通输入、缓存输入、普通输出和推理 Token 类别都存在明确单价时才计算总费用，任一实际类别缺价就显示“未配置”，绝不把未知价格默认为免费。Anthropic 风格的 `cache_read_input_tokens` 作为附加输入累计，而不是误当成 `input_tokens` 的子集。日志不记录提示词、完整响应、密钥、凭据引用或完整上游 URL。
 - 非侵入端口避让：端口被占用时只选择后续空闲端口，绝不按端口结束其他进程。
 
 ![请求级 Token、性能与计费日志](docs/images/provider-hub-logs.png)
@@ -58,16 +58,16 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.9
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.10
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.9.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.10.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.9.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.10.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.9 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.10 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 
@@ -345,7 +345,7 @@ v0.3 更名为 DSH Provider Hub，并从“桥接外部 Cockpit”迁移为独�
 - **OAuth 完成后没有模型**：点击 **刷新账号**，检查账号是否停用或暂不可用；也可保留 API Key 渠道作为普通或保底路径。
 - **DSH 中没有自动出现 Provider Hub**：确认 relay 正在运行且至少有一个可用模型；零模型时插件会等待，不创建无效供应商。
 - **模型规格没有自动补全**：确认 DSH 已配置可用的默认模型和联网检索服务，并且 Provider Hub 至少有一个可安全识别厂商的新模型。
-- **日志费用显示“未配置”**：上游没有返回 cost，且当前渠道没有为该模型配置每百万 Token 单价。在渠道编辑器填写“模型价格 JSON”后，新请求会按输入、缓存输入、输出与推理 Token 分别估算；历史日志不会追溯重算。
+- **日志费用显示“未配置”**：上游没有返回 cost，或当前渠道没有为本次实际使用的每一种 Token 类别配置每百万 Token 单价。只配置输入价但请求产生了输出，不会把输出误算为免费。在渠道编辑器填写“模型价格 JSON”后，新请求会按输入、缓存输入、输出与推理 Token 分别估算；历史日志不会追溯重算。
 - **部分字段仍显示“待补全”**：搜索引用与可访问正文都没有证明该字段，或思考程度缺少准确 API wire 值。其他已被证据证明的字段仍会保留；插件不会猜测空白字段。
 - **需要再次尝试**：打开 **模型规格** 标签并点击 **一键填写规格**；可先选择具体 API Key 与文本模型。
 - **补全后是否需要重启**：不需要。规格写入后由 DSH settings 热更新；只有安装或升级 Provider Hub 插件本身时，才需要用户在方便时自行重启 `dsh web`。
