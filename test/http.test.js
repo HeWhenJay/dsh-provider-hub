@@ -245,6 +245,17 @@ test('stream relay joins multiline SSE data before parsing usage', async () => {
   } finally { await fixture.dispose(); }
 });
 
+test('maximum context uses quarter-window recommendation for compression', async () => {
+  const vendor = { url: 'https://developers.openai.com/api/docs/models/gpt-5.6-sol', title: 'GPT-5.6 Sol official page' };
+  const response = JSON.stringify({ id: 'gpt-5.6-sol', maximumContextWindow: 1050000, maxTokens: 128000, reasoningEfforts: null, sources: ['https://ai.azure.com/catalog/models/gpt-5.6-sol'] });
+  const services = researchServices(response, [vendor]);
+  delete services.providerHubResearchFetch.fetch;
+  services.providerHubResearchFetch.lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+  services.providerHubResearchFetch.request = async (target) => target.parsed.hostname === 'ai.azure.com' ? { status: 200, contentType: 'text/html', text: '<script>"OpenAI gpt-5.6-sol","textContextWindow",1050000,"maxOutputTokens",128000</script>' } : { status: 403, contentType: 'text/plain', text: 'blocked' };
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-5.6-sol'] }] }, {}, undefined, services);
+  try { await fixture.instance.startSpecificationResearch({}); await fixture.instance.specResearchPromise; const spec = fixture.instance.config.modelSpecifications['gpt-5.6-sol']; assert.equal(spec.maximumContextWindow, 1050000); assert.equal(spec.contextWindow, 262500); assert.equal(spec.contextWindowPolicy, 'quarter-maximum'); assert.equal(spec.fieldEvidence.contextWindow.divisor, 4); } finally { await fixture.dispose(); }
+});
+
 test('partial usage frames preserve previously captured token fields and null cost uses route pricing', async () => {
   const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1' }, accountService: { enabled: false }, routes: [{ id: 'stream', baseURL: 'https://stream.invalid/v1', models: ['gpt-test'], modelPricing: { 'gpt-test': { inputPerMillion: 1, outputPerMillion: 2, currency: 'USD' } } }] });
   const sse = 'data: {"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12},"cost":null}\n\ndata: {"usage":{"total_tokens":12},"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\n';
@@ -921,6 +932,7 @@ test('manual retry runs again after automatic enrichment lacks evidence', async 
   let searches = 0;
   const services = researchServices('{}', []);
   services.web.search = async () => { searches += 1; return { sources: [], truncated: false }; };
+  services.providerHubResearchFetch.fetch = async (source) => ({ ...source, fetchStatus: 'failed' });
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [] }, {}, settingsService, services);
   try {
     await fixture.instance.start();
@@ -941,7 +953,10 @@ test('one-click research fetches source pages and fills specifications through t
   let searches = 0;
   let fetches = 0;
   services.web.search = async () => { searches += 1; return { sources: [source], truncated: false }; };
-  services.providerHubResearchFetch.fetch = async (item) => { fetches += 1; return { ...item, pageText: 'gpt-test has a 128000 context window and 16384 maximum output tokens. gpt-test reasoning effort API values are low, medium, and high.', fetchStatus: 'fetched' }; };
+  services.providerHubResearchFetch.fetch = async (item) => {
+    if (item.url === source.url) { fetches += 1; return { ...item, pageText: 'gpt-test has a 128000 context window and 16384 maximum output tokens. gpt-test reasoning effort API values are low, medium, and high.', fetchStatus: 'fetched' }; }
+    return { ...item, fetchStatus: 'failed' };
+  };
   const fixture = runtime({ listen: { enabled: true, host: '127.0.0.1', port: 0 }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-test'] }] }, {}, settingsService, services);
   try {
     await fixture.instance.start();
@@ -1014,6 +1029,41 @@ test('one-click research rejects non-public DNS results before requesting source
     assert.equal(requested, false);
     assert.equal(fixture.instance.config.modelSpecifications['gpt-test'], undefined);
   } finally { await fixture.dispose(); }
+});
+
+test('platform-official structured model data fills exact fields when the vendor page is blocked', async () => {
+  const vendor = { url: 'https://developers.openai.com/api/docs/models/gpt-5.6-sol', title: 'GPT-5.6 Sol official page' };
+  const response = JSON.stringify({ id: 'gpt-5.6-sol', maximumContextWindow: 1050000, maxTokens: 128000, reasoningEfforts: null, sources: ['https://ai.azure.com/catalog/models/gpt-5.6-sol'] });
+  const services = researchServices(response, [vendor]);
+  delete services.providerHubResearchFetch.fetch;
+  services.providerHubResearchFetch.lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+  services.providerHubResearchFetch.request = async (target) => target.parsed.hostname === 'ai.azure.com'
+    ? { status: 200, contentType: 'text/html', text: '<script>"summary","GPT-5.6-sol is OpenAI model","OpenAI gpt-5.6-sol","textContextWindow",1050000,"maxOutputTokens",128000</script>' }
+    : { status: 403, contentType: 'text/plain', text: 'blocked' };
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-5.6-sol'] }] }, {}, undefined, services);
+  try {
+    await fixture.instance.startSpecificationResearch({});
+    await fixture.instance.specResearchPromise;
+    const specification = fixture.instance.config.modelSpecifications['gpt-5.6-sol'];
+    assert.equal(specification.maximumContextWindow, 1050000);
+    assert.equal(specification.contextWindow, 262500);
+    assert.equal(specification.contextWindowPolicy, 'quarter-maximum');
+    assert.equal(specification.maxTokens, 128000);
+    assert.equal(specification.evidenceType, 'platform-official');
+    assert.equal(specification.fieldEvidence.contextWindow.type, 'platform-official');
+    assert.deepEqual(specification.sources, ['https://ai.azure.com/catalog/models/gpt-5.6-sol']);
+  } finally { await fixture.dispose(); }
+});
+
+test('failed platform-official fetch cannot turn its URL and title into evidence', async () => {
+  const vendor = { url: 'https://developers.openai.com/api/docs/models/gpt-5.6-sol', title: 'GPT-5.6 Sol official page' };
+  const response = JSON.stringify({ id: 'gpt-5.6-sol', maximumContextWindow: 1050000, maxTokens: 128000, reasoningEfforts: null, sources: ['https://ai.azure.com/catalog/models/gpt-5.6-sol'] });
+  const services = researchServices(response, [vendor]);
+  delete services.providerHubResearchFetch.fetch;
+  services.providerHubResearchFetch.lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+  services.providerHubResearchFetch.request = async () => { throw new Error('network failed'); };
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [{ id: 'a', baseURL: 'https://a.invalid/v1', models: ['gpt-5.6-sol'] }] }, {}, undefined, services);
+  try { await fixture.instance.startSpecificationResearch({}); await fixture.instance.specResearchPromise; assert.equal(fixture.instance.config.modelSpecifications['gpt-5.6-sol'], undefined); } finally { await fixture.dispose(); }
 });
 
 test('failed page fetch cannot turn URL and title alone into official evidence', async () => {

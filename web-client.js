@@ -188,7 +188,7 @@ window.__ModuleLoader__.load({
 
     function evidenceLabel(model, field) {
       const type = model.fieldEvidence?.[field]?.type;
-      return type === 'community-consensus' ? '社区共识' : type === 'official' ? '官方证据' : '';
+      return type === 'community-consensus' ? '社区共识' : type === 'platform-official' ? '平台官方证据' : type === 'official' ? '厂商官方证据' : '';
     }
 
     function ModelSpecifications({ research }) {
@@ -201,7 +201,7 @@ window.__ModuleLoader__.load({
         return React.createElement('article', { className: 'ph-specRow', 'data-status': statusKey, key: model.id },
           React.createElement('div', { className: 'ph-specTop' }, React.createElement('div', null, React.createElement('div', { className: 'ph-specId' }, model.name || model.id), model.name && React.createElement('div', { className: 'ph-meta' }, model.id)), React.createElement('span', { className: 'ph-specStatus', 'data-status': statusKey }, status)),
           React.createElement('div', { className: 'ph-specGrid' },
-            React.createElement('div', { className: 'ph-specMetric' }, '上下文窗口', React.createElement('strong', null, formatCount(model.contextWindow)), evidenceLabel(model, 'contextWindow') && React.createElement('span', { className: 'ph-meta' }, evidenceLabel(model, 'contextWindow'))),
+            React.createElement('div', { className: 'ph-specMetric' }, '推荐上下文窗口', React.createElement('strong', null, formatCount(model.contextWindow)), model.maximumContextWindow && React.createElement('span', { className: 'ph-meta' }, `最大 ${formatCount(model.maximumContextWindow)} · ${model.contextWindowPolicy === 'quarter-maximum' ? '最大值 1/4' : model.contextWindowPolicy === 'source-recommended' ? '来源推荐' : '已配置'}`), evidenceLabel(model, 'contextWindow') && React.createElement('span', { className: 'ph-meta' }, evidenceLabel(model, 'contextWindow'))),
             React.createElement('div', { className: 'ph-specMetric' }, '最大输出窗口', React.createElement('strong', null, formatCount(model.maxTokens)), evidenceLabel(model, 'maxTokens') && React.createElement('span', { className: 'ph-meta' }, evidenceLabel(model, 'maxTokens'))),
             React.createElement('div', { className: 'ph-specMetric' }, '思考程度', React.createElement('strong', null, reasoningText(model.reasoningEfforts)), evidenceLabel(model, 'reasoningEfforts') && React.createElement('span', { className: 'ph-meta' }, evidenceLabel(model, 'reasoningEfforts')))
           ),

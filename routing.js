@@ -45,6 +45,8 @@ export function normalizeConfig(raw = {}) {
     const specification = rawSpecification && typeof rawSpecification === 'object' ? rawSpecification : {};
     if (!id) continue;
     const contextWindow = Number(specification.contextWindow);
+    const maximumContextWindow = Number(specification.maximumContextWindow);
+    const contextWindowPolicy = ['source-recommended', 'quarter-maximum'].includes(specification.contextWindowPolicy) ? specification.contextWindowPolicy : undefined;
     const maxTokens = Number(specification.maxTokens);
     const reasoningEfforts = specification.reasoningEfforts === false || specification.reasoningEfforts && typeof specification.reasoningEfforts === 'object' ? structuredClone(specification.reasoningEfforts) : undefined;
     const compat = specification.compat && typeof specification.compat === 'object' ? { ...specification.compat } : undefined;
@@ -52,12 +54,14 @@ export function normalizeConfig(raw = {}) {
       id,
       ...(asString(specification.name) ? { name: asString(specification.name) } : {}),
       ...(Number.isInteger(contextWindow) && contextWindow > 0 ? { contextWindow } : {}),
+      ...(Number.isInteger(maximumContextWindow) && maximumContextWindow > 0 ? { maximumContextWindow } : {}),
+      ...(contextWindowPolicy ? { contextWindowPolicy } : {}),
       ...(Number.isInteger(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
       ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
       ...(compat ? { compat } : {}),
       sources: Array.isArray(specification.sources) ? [...new Set(specification.sources.map((source) => asString(source)).filter((source) => /^https:\/\//i.test(source)).slice(0, 6))] : [],
       ...(specification.fieldEvidence && typeof specification.fieldEvidence === 'object' ? { fieldEvidence: structuredClone(specification.fieldEvidence) } : {}),
-      ...(specification.evidenceType === 'community-consensus' || specification.evidenceType === 'official' ? { evidenceType: specification.evidenceType } : {}),
+      ...(['community-consensus', 'platform-official', 'official'].includes(specification.evidenceType) ? { evidenceType: specification.evidenceType } : {}),
       ...(asString(specification.researchedAt) ? { researchedAt: asString(specification.researchedAt) } : {})
     };
   }
