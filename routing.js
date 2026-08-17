@@ -150,6 +150,7 @@ export class ChannelRouter {
       throw error;
     }
     let lastError;
+    request.candidateCount = candidates.length;
     for (let index = 0; index < candidates.length; index += 1) {
       const route = candidates[index];
       request.attempt = index + 1;

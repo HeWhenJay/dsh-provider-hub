@@ -46,7 +46,7 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 - 自动接入 DSH Models：服务启动后按实际监听端口创建 `provider-hub` 供应商，并同步每个 Key 白名单过滤后的聚合模型目录。
 - 路由控制：优先级、普通/保底渠道、瞬时故障冷却、最大尝试次数、会话粘性和模型别名。
 - 安全凭据：首次启动自动生成以 `Provider-Hub-` 开头的 Relay 客户端 API Key，一次性展示给用户复制；实际密钥写入 DSH credentials，JSON 配置仅保存凭据引用，用户可在服务设置中替换。
-- 脱敏日志与计费：Provider Hub 为每次请求生成自己的 UUID（不持久化调用方 `X-Request-ID`），逐次尝试展示请求 ID、Key 名称、模型与上游模型、协议、重试、HTTP 状态、finish reason、输入/缓存/输出/推理/总 Token、首 Token 与完整耗时。客户端断开会取消上游请求并标记失败，Relay 遵守写入背压；合法的多行 SSE 事件也能正确解析 usage。Token 优先采用供应商 usage，缺失时明确标记本地估算；费用优先采用供应商报告，否则按渠道配置的每百万 Token 单价估算，未配置价格时不虚构金额。日志不记录提示词、完整响应、密钥、凭据引用或完整上游 URL。
+- 脱敏日志与计费：Provider Hub 为每次请求生成自己的 UUID（不持久化调用方 `X-Request-ID`），逐次尝试展示请求 ID、Key 名称、模型与上游模型、协议、重试、HTTP 状态、finish reason、输入/缓存/输出/推理/总 Token、首 Token 与完整耗时。客户端断开会取消上游请求并标记失败，Relay 遵守写入背压；合法的多行 SSE 事件也能正确解析 usage。Token 优先采用供应商 usage，部分 usage 帧只覆盖实际存在的字段，不会清除早先记录；缺失时明确标记本地估算；费用优先采用供应商报告，否则按渠道配置的每百万 Token 单价估算，未配置价格时不虚构金额。日志不记录提示词、完整响应、密钥、凭据引用或完整上游 URL。
 - 非侵入端口避让：端口被占用时只选择后续空闲端口，绝不按端口结束其他进程。
 
 ![请求级 Token、性能与计费日志](docs/images/provider-hub-logs.png)
@@ -58,16 +58,16 @@ Provider Hub 可以同时代理多个 API 提供商、同一地址下的多个 A
 从 GitHub tag 安装：
 
 ```bash
-dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.8
+dsh plugin --profile web add github:HeWhenJay/dsh-provider-hub#v0.6.9
 ```
 
-也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.8.tgz` 后安装：
+也可以下载 GitHub release 中的 `hewhenjay-dsh-provider-hub-0.6.9.tgz` 后安装：
 
 ```bash
-dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.8.tgz
+dsh plugin --profile web add ./hewhenjay-dsh-provider-hub-0.6.9.tgz
 ```
 
-npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.8 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
+npm 包名已预留为 `@hewhenjay/dsh-provider-hub`，但 v0.6.9 当前以 GitHub tag 和 release 资产为正式发布渠道。Host 与 Web Client 通常在下次安全重启 `dsh web` 后加载。不要为了安装插件停止当前正在承载会话或模型调用的服务；可在方便时重启并刷新 DSH Web 页面。
 
 安装后可从左侧栏上方的 **Provider Hub** 应用入口进入。它位于任务看板之后，点击后在中间区域打开独立页面；旧的侧栏底部入口和 Settings 页面入口已移除。
 
@@ -296,7 +296,7 @@ POST /v1/chat/completions
 POST /v1/responses
 ```
 
-DSH Host 管理接口（供插件 Web UI 使用）。`GET /logs` 返回 `{ logs, summary }`：明细包含 usage、性能和计费依据，summary 按 Token、成功/失败、平均耗时与币种汇总：
+DSH Host 管理接口（供插件 Web UI 使用）。`GET /logs` 返回 `{ logs, summary }`：明细按渠道尝试记录 usage、性能和计费依据；summary 按 Provider Hub 生成的 requestId 聚合客户端请求，同时分别给出请求数、渠道尝试数、故障切换数与失败尝试数。成功/失败和平均耗时按完整客户端请求计算，Token 与费用按所有实际渠道尝试累计，因为失败尝试也可能产生真实用量：
 
 ```text
 GET    /api/provider-hub/state

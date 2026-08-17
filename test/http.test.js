@@ -173,6 +173,24 @@ test('chat endpoint fails over and preserves streaming bytes', async () => {
     });
     assert.deepEqual(calls, ['cheap', 'backup']);
     assert.equal(fixture.instance.logs.length, 2);
+    const summary = fixture.instance.logSummary();
+    assert.equal(summary.requests, 1);
+    assert.equal(summary.attempts, 2);
+    assert.equal(summary.failovers, 1);
+    assert.equal(summary.failedAttempts, 1);
+    assert.equal(summary.successful, 1);
+    assert.equal(summary.failed, 0);
+  } finally { await fixture.dispose(); }
+});
+
+test('log summary groups failover attempts into one client request with end-to-end latency', async () => {
+  const fixture = runtime({ listen: { enabled: false }, accountService: { enabled: false }, routes: [] });
+  fixture.instance.logs = [
+    { id: 'success', requestId: 'request-1', requestStartedAt: 1000, time: new Date(1200).toISOString(), completedAt: new Date(1800).toISOString(), attempt: 2, routeId: 'b', routeName: 'b', keyName: 'b', model: 'gpt-test', ok: true, status: 200, totalTokens: 12, totalLatencyMs: 600 },
+    { id: 'failure', requestId: 'request-1', requestStartedAt: 1000, time: new Date(1000).toISOString(), completedAt: new Date(1150).toISOString(), attempt: 1, routeId: 'a', routeName: 'a', keyName: 'a', model: 'gpt-test', ok: false, status: 503, totalLatencyMs: 150 }
+  ];
+  try {
+    assert.deepEqual(fixture.instance.logSummary(), { requests: 1, successful: 1, failed: 0, attempts: 2, failovers: 1, failedAttempts: 1, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 12, averageLatencyMs: 800, costByCurrency: {} });
   } finally { await fixture.dispose(); }
 });
 
@@ -224,6 +242,21 @@ test('stream relay joins multiline SSE data before parsing usage', async () => {
     await withServer((req, res) => fixture.instance.handleRelay(req, res), async (url) => { const response = await fetch(`${url}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'gpt-test', messages: [{ role: 'user', content: 'hello' }], stream: true }) }); assert.equal(await response.text(), sse); });
     assert.equal(fixture.instance.logs[0].totalTokens, 4);
     assert.equal(fixture.instance.logs[0].finishReason, 'stop');
+  } finally { await fixture.dispose(); }
+});
+
+test('partial usage frames preserve previously captured token fields and null cost uses route pricing', async () => {
+  const fixture = runtime({ listen: { enabled: false, host: '127.0.0.1' }, accountService: { enabled: false }, routes: [{ id: 'stream', baseURL: 'https://stream.invalid/v1', models: ['gpt-test'], modelPricing: { 'gpt-test': { inputPerMillion: 1, outputPerMillion: 2, currency: 'USD' } } }] });
+  const sse = 'data: {"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12},"cost":null}\n\ndata: {"usage":{"total_tokens":12},"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\n';
+  fixture.instance.transport = async () => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  try {
+    await withServer((req, res) => fixture.instance.handleRelay(req, res), async (url) => { const response = await fetch(`${url}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'gpt-test', messages: [{ role: 'user', content: 'hello' }], stream: true }) }); await response.text(); });
+    const log = fixture.instance.logs[0];
+    assert.equal(log.inputTokens, 10);
+    assert.equal(log.outputTokens, 2);
+    assert.equal(log.totalTokens, 12);
+    assert.equal(log.costSource, 'route-pricing');
+    assert.equal(log.cost, 0.000014);
   } finally { await fixture.dispose(); }
 });
 

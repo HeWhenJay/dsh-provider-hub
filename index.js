@@ -315,7 +315,7 @@ function fetchPinnedResearchSource(target, signal) {
       servername: parsed.hostname,
       path: `${parsed.pathname}${parsed.search}`,
       method: 'GET',
-      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.8' },
+      headers: { host: parsed.host, accept: 'text/html, text/plain;q=0.9', 'accept-encoding': 'identity', 'user-agent': 'dsh-provider-hub/0.6.9' },
       timeout: RESEARCH_FETCH_TIMEOUT_MS,
       signal
     }, (response) => {
@@ -560,7 +560,14 @@ function usageFromPayload(payload) {
   const reasoningTokens = positiveNumber(usage.completion_tokens_details?.reasoning_tokens ?? usage.output_tokens_details?.reasoning_tokens);
   const totalTokens = positiveNumber(usage.total_tokens) ?? (inputTokens !== undefined || outputTokens !== undefined ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined);
   const reportedCost = positiveNumber(payload?.cost ?? payload?.total_cost ?? payload?.response_cost ?? usage.cost ?? usage.total_cost);
-  return { inputTokens, outputTokens, cachedInputTokens, reasoningTokens, totalTokens, reportedCost };
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+    ...(reportedCost !== undefined ? { reportedCost } : {})
+  };
 }
 
 function payloadOutputText(payload) {
@@ -1102,7 +1109,7 @@ class RelayRuntime {
   async transport(route, model, request) {
     const key = await this.secret(route.apiKeyEnv);
     const body = { ...(request?.body ?? {}), model: routeModel(route, model) };
-    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.8', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
+    const headers = { 'content-type': 'application/json', 'user-agent': 'dsh-provider-hub/0.6.9', ...(request?.requestId ? { 'x-request-id': request.requestId } : {}), ...route.headers };
     if (key) headers.authorization = `Bearer ${key}`;
     return fetch(routeEndpoint(route, request?.endpoint), {
       method: 'POST',
@@ -1258,6 +1265,7 @@ class RelayRuntime {
     const log = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       requestId: asString(entry.request?.requestId),
+      requestStartedAt: positiveNumber(entry.request?.startedAt),
       time: new Date().toISOString(),
       routeId: entry.route.id,
       routeName: entry.route.displayName,
@@ -1266,6 +1274,7 @@ class RelayRuntime {
       upstreamModel: routeModel(entry.route, entry.model),
       api: entry.route.api,
       attempt: positiveNumber(entry.request?.attempt) ?? 1,
+      candidateCount: positiveNumber(entry.request?.candidateCount) ?? 1,
       backup: entry.route.backup === true,
       ok: entry.ok,
       status: entry.status,
@@ -1386,19 +1395,36 @@ class RelayRuntime {
   }
 
   logSummary() {
-    const completed = this.logs.filter((log) => log.completedAt || !log.ok);
+    const attempts = this.logs.filter((log) => log.completedAt || !log.ok);
+    const groups = new Map();
+    for (const log of attempts) {
+      const id = log.requestId || log.id;
+      const group = groups.get(id) ?? [];
+      group.push(log);
+      groups.set(id, group);
+    }
+    const requests = [...groups.values()].map((group) => {
+      const ordered = [...group].sort((left, right) => left.attempt - right.attempt);
+      const final = ordered.findLast((log) => log.ok) ?? ordered.at(-1);
+      const startedAt = positiveNumber(ordered[0]?.requestStartedAt) ?? Math.min(...ordered.map((log) => Date.parse(log.time)).filter(Number.isFinite));
+      const completedAt = Math.max(...ordered.map((log) => Date.parse(log.completedAt ?? log.time)).filter(Number.isFinite));
+      return { final, attempts: ordered, latencyMs: Number.isFinite(startedAt) && Number.isFinite(completedAt) ? Math.max(0, completedAt - startedAt) : final.totalLatencyMs ?? final.latencyMs ?? 0 };
+    });
     const currencies = {};
-    for (const log of completed) if (log.cost !== undefined && log.currency) currencies[log.currency] = (currencies[log.currency] ?? 0) + log.cost;
+    for (const log of attempts) if (log.cost !== undefined && log.currency) currencies[log.currency] = (currencies[log.currency] ?? 0) + log.cost;
     return {
-      requests: completed.length,
-      successful: completed.filter((log) => log.ok).length,
-      failed: completed.filter((log) => !log.ok).length,
-      inputTokens: completed.reduce((sum, log) => sum + (log.inputTokens ?? 0), 0),
-      cachedInputTokens: completed.reduce((sum, log) => sum + (log.cachedInputTokens ?? 0), 0),
-      outputTokens: completed.reduce((sum, log) => sum + (log.outputTokens ?? 0), 0),
-      reasoningTokens: completed.reduce((sum, log) => sum + (log.reasoningTokens ?? 0), 0),
-      totalTokens: completed.reduce((sum, log) => sum + (log.totalTokens ?? 0), 0),
-      averageLatencyMs: completed.length ? Math.round(completed.reduce((sum, log) => sum + (log.totalLatencyMs ?? log.latencyMs ?? 0), 0) / completed.length) : 0,
+      requests: requests.length,
+      successful: requests.filter((request) => request.final.ok).length,
+      failed: requests.filter((request) => !request.final.ok).length,
+      attempts: attempts.length,
+      failovers: requests.filter((request) => request.attempts.length > 1).length,
+      failedAttempts: attempts.filter((log) => !log.ok).length,
+      inputTokens: attempts.reduce((sum, log) => sum + (log.inputTokens ?? 0), 0),
+      cachedInputTokens: attempts.reduce((sum, log) => sum + (log.cachedInputTokens ?? 0), 0),
+      outputTokens: attempts.reduce((sum, log) => sum + (log.outputTokens ?? 0), 0),
+      reasoningTokens: attempts.reduce((sum, log) => sum + (log.reasoningTokens ?? 0), 0),
+      totalTokens: attempts.reduce((sum, log) => sum + (log.totalTokens ?? 0), 0),
+      averageLatencyMs: requests.length ? Math.round(requests.reduce((sum, request) => sum + request.latencyMs, 0) / requests.length) : 0,
       costByCurrency: currencies
     };
   }
@@ -1434,7 +1460,7 @@ class RelayRuntime {
     req.once('aborted', abortUpstream);
     res.once('close', () => { if (!res.writableEnded) abortUpstream(); });
     try {
-      const { result, route, attempt } = await this.router.execute(model, { body, endpoint, requestId, signal: controller.signal }, sessionId || undefined);
+      const { result, route, attempt } = await this.router.execute(model, { body, endpoint, requestId, startedAt, signal: controller.signal }, sessionId || undefined);
       const upstream = this.observeUpstream(result, attempt, route, model, startedAt, controller.signal);
       res.writeHead(upstream.status, {
         'cache-control': 'no-store',
